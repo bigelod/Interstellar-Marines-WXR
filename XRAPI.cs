@@ -44,9 +44,9 @@ public static class XRAPI
     static float targetFovY = 104.5f;
 
 
-    public static bool XR_Init()
+    public static void XR_Init()
     {
-        if(running) return true;
+        if(running) return;
 
         string dataDirectory = "Z:/tmp/xr";
 
@@ -82,32 +82,28 @@ public static class XRAPI
             try{
                 client = new UdpClient(port);
                 client.Client.ReceiveTimeout = 500;
-                running = true;
                 recvThread = new Thread(RecvLoopParam);
                 recvThread.IsBackground = true;
                 recvThread.Start(port);
-                Debug.Log("[IMVR] UDP listening on " + port);
+                VRManagerLogger.LogInfo("[IMVR] UDP listening on " + port);
                 latest.headRot = Quaternion.identity;
                 latest.leftRot = Quaternion.identity;
                 latest.rightRot = Quaternion.identity;
-                return true;
             } catch(Exception e){
-                Debug.LogWarning("[IMVR] Port " + port + " busy: " + e.Message);
+                VRManagerLogger.LogWarn("[IMVR] Port " + port + " busy: " + e.Message);
                 try{ if(client!=null) client.Close(); }catch{}
             }
         }
-        Debug.LogWarning("[IMVR] No UDP port, checking D:/xrtemp fallback");
-
+        
         // Still start sender even if receiver failed
         try
         {
             sendClient = new UdpClient();
-            running = true;
             SendFirstFrame();
         }
         catch { }
 
-        return false;
+        running = true;
     }
 
     static void RecvLoopParam(object obj)
@@ -126,9 +122,10 @@ public static class XRAPI
                 string s = Encoding.ASCII.GetString(data).Trim();
                 ParseString(s);
             } catch(SocketException){
+                VRManagerLogger.LogWarn("[IMVR] No UDP port, checking D:/xrtemp fallback");
                 TryFileFallback();
             } catch(Exception e){
-                Debug.LogWarning("[IMVR] UDP error: "+e.Message);
+                VRManagerLogger.LogWarn("[IMVR] UDP error: "+e.Message);
             }
         }
     }
@@ -146,12 +143,12 @@ public static class XRAPI
             if (sendClient != null)
             {
                 sendClient.Send(bytes, bytes.Length, sendEndpoint);
-                Debug.Log("[IMVR] Sent first frame to awaken WinlatorXR: " + msg);
+                VRManagerLogger.LogInfo("[IMVR] Sent first frame to awaken WinlatorXR: " + msg);
             }
         }
         catch (Exception e)
         {
-            Debug.LogWarning("[IMVR] SendFirstFrame failed: " + e.Message);
+            VRManagerLogger.LogWarn("[IMVR] SendFirstFrame failed: " + e.Message);
         }
     }
 
@@ -247,7 +244,7 @@ public static class XRAPI
                 latest.hmdType=hmdType; latest.lastUpdate=Time.realtimeSinceStartup; hasData=true;
             }
         } catch(Exception e){
-            Debug.LogWarning("[IMVR] Parse fail: "+e.Message);
+            VRManagerLogger.LogWarn("[IMVR] Parse fail: "+e.Message);
         }
     }
 
@@ -310,7 +307,7 @@ public static class XRAPI
         //We know we're in VR for sure now
         modeVR = 1;
         mode3D = 0;
-        Debug.Log("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
+        VRManagerLogger.LogInfo("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
 
         SendHapticUpdate();
     }
@@ -367,20 +364,20 @@ public static class XRAPI
             // If not in-game (title screen, main menu) or paused -> 2D screen mode
             if(!isInGame || isPaused){
                 if(modeVR != 2){
-                    Debug.Log("[IMVR] Switching to 2D UI mode (MODE_VR=2) - not in-game or paused. isInGame="+isInGame+" isPaused="+isPaused);
+                    VRManagerLogger.LogInfo("[IMVR] Switching to 2D UI mode (MODE_VR=2) - not in-game or paused. isInGame="+isInGame+" isPaused="+isPaused);
                 }
                 modeVR = 2; // Non-VR / 2D screen mode per WinlatorXR spec
                 mode3D = 0; // flat
             } else {
                 if(modeVR != 1){
-                    Debug.Log("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
+                    VRManagerLogger.LogInfo("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
                 }
                 modeVR = 1; // VR mode
                 mode3D = 0; // mono for Interstellar Marines
             }
         } catch(Exception e){
             // Fallback: stay in VR mode
-            Debug.LogWarning("[IMVR] UpdateVRMode failed: " + e.Message);
+            VRManagerLogger.LogWarn("[IMVR] UpdateVRMode failed: " + e.Message);
             modeVR = 1;
             mode3D = 0;
         }

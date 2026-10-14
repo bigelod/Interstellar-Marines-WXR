@@ -21,7 +21,7 @@ class Helmet_InitFirstPersonCamera_Patch
         if(cam!=null && cam.GetComponent<VRHeadTracker>()==null){
             XRAPI.ForceVRMode();
             cam.gameObject.AddComponent<VRHeadTracker>();
-            Debug.Log("[IMVR] Added VRHeadTracker");
+            VRManagerLogger.LogInfo("[IMVR] Added VRHeadTracker");
         }
 
         if (cam != null)
@@ -29,7 +29,7 @@ class Helmet_InitFirstPersonCamera_Patch
             if (cam.GetComponent<SyncPixelQuad>() == null)
             {
                 cam.gameObject.AddComponent<SyncPixelQuad>();
-                Debug.Log("[IMVR] Added SyncPixelQuad");
+                VRManagerLogger.LogInfo("[IMVR] Added SyncPixelQuad");
             }
         }
 

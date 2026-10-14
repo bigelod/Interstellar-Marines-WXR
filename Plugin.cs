@@ -4,6 +4,14 @@ using BepInEx;
 using HarmonyLib;
 using UnityEngine;
 
+public static class VRManagerLogger
+{
+    public static Action<string> LogDebug;
+    public static Action<string> LogInfo;
+    public static Action<string> LogWarn;
+    public static Action<string> LogError;
+}
+
 [BepInPlugin("im.vr.winlatorxr", "IMVR - Interstellar Marines WinlatorXR", "0.3.2")]
 public class VRManager : BaseUnityPlugin
 {
@@ -14,6 +22,11 @@ public class VRManager : BaseUnityPlugin
 
     void Awake()
     {
+        VRManagerLogger.LogInfo = LogDebug;
+        VRManagerLogger.LogWarn = LogWarn;
+        VRManagerLogger.LogError = LogError;
+        VRManagerLogger.LogInfo = LogInfo;
+
         LoadConfig();
         XRAPI.XR_Init();
 
@@ -23,8 +36,28 @@ public class VRManager : BaseUnityPlugin
         GameObject runner = new GameObject("IMVR_InputRunner");
         DontDestroyOnLoad(runner);
         runner.AddComponent<VRInputRunner>();
-
+        
         Logger.LogInfo("[IMVR] Interstellar Marines VR - UDP 7872 loaded, dominant=" + configDominant + " flipHands=" + flipHands.ToString());
+    }
+
+    void LogWarn(string msg)
+    {
+        Logger.LogWarning(msg);
+    }
+
+    void LogError(string msg)
+    {
+        Logger.LogError(msg);
+    }
+
+    void LogInfo(string msg)
+    {
+        Logger.LogInfo(msg);
+    }
+
+    void LogDebug(string msg)
+    {
+        Logger.LogDebug(msg);
     }
 
     void OnDestroy(){ XRAPI.Shutdown(); }
@@ -55,7 +88,7 @@ public class VRManager : BaseUnityPlugin
             }
             VRInput.SetConfig(deadzone);
         } catch(Exception e){
-            Debug.LogError("[IMVR] Config error: "+e);
+            VRManagerLogger.LogError("[IMVR] Config error: "+e);
         }
     }
 }

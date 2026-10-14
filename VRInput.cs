@@ -86,7 +86,7 @@ public static class VRInput
                 if (currentSlot > 3) currentSlot = 1;
                 SetSlot(currentSlot);
                 lastSlotSwitch = Time.time;
-                Debug.Log("[IMVR] Slot up -> Slot0" + currentSlot);
+                VRManagerLogger.LogInfo("[IMVR] Slot up -> Slot0" + currentSlot);
             }
             else if (stickDown && !rightStickDownHeld)
             {
@@ -95,7 +95,7 @@ public static class VRInput
                 if (currentSlot < 1) currentSlot = 3;
                 SetSlot(currentSlot);
                 lastSlotSwitch = Time.time;
-                Debug.Log("[IMVR] Slot down -> Slot0" + currentSlot);
+                VRManagerLogger.LogInfo("[IMVR] Slot down -> Slot0" + currentSlot);
             }
         }
         rightStickUpHeld = stickUp;
