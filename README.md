@@ -1,5 +1,5 @@
 # Interstellar-Marines-WXR
-An attempt to do a monocular "VR" experience for Interstellar Marines on WinlatorXR standalones
+An attempt to do a "monocular VR" 6DOF experience for **Interstellar Marines** on **Standalones** via **WinlatorXR**
 
 Created with the help of Meta.AI
 
