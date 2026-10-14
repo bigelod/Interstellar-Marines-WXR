@@ -24,7 +24,7 @@ public class VRManager : BaseUnityPlugin
         DontDestroyOnLoad(runner);
         runner.AddComponent<VRInputRunner>();
 
-        Logger.LogInfo("[IMVR] Interstellar Marines VR - SixDOFinator UDP 7872 loaded, dominant=" + configDominant + " flipHands=" + flipHands.ToString());
+        Logger.LogInfo("[IMVR] Interstellar Marines VR - UDP 7872 loaded, dominant=" + configDominant + " flipHands=" + flipHands.ToString());
     }
 
     void OnDestroy(){ XRAPI.Shutdown(); }

@@ -86,6 +86,6 @@ You need DLLs from your Interstellar Marines install to compile (Unity / .NET 3.
 - `XRAPI.cs` - UDP 7872 receive + 7278 send (first frame + haptics + MODE_VR switch), file markers, `D:/xrtemp` fallback
 - `VRHeadTracker.cs` - fixes double offset bug, HMD RH->LH `-x,-y,z`, visor lock, post-processing disable
 - `VRWeapon.cs` - RH->LH `pos.z=-z, quat(-x,-y,z,w)` + HMD-local to world via HelmetBase parent
-- `VRInput.cs` - maps SixDOFinator bools to IM KeyBinds, Slot01-03 loop, blocks KB/mouse for mapped
+- `VRInput.cs` - maps bools to IM KeyBinds, Slot01-03 loop, blocks KB/mouse for mapped
 - `Patches.cs` - Harmony patches for Helmet, RangedWeapon, InputManager IsInput/IsInputDown + GetAxis + SyncPixelQuad
 - `SyncPixelQuad.cs` - red/black quad top-left flashing with `frameId %2` (HMD_SYNC)

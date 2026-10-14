@@ -32,7 +32,7 @@ public class VRWeapon : MonoBehaviour
 
         // Known bug: Quest 3 vs Pico 4 Ultra hands are 180deg rolled
         if (VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
-        // 5. HMD-local -> world (SixDOFinator sends local to HMD)
+        // 5. HMD-local -> world (app sends local to HMD)
         Transform refT = VRHeadTracker.VRRoot;
         Transform origin = refT != null ? refT.parent : null;
         if (origin != null)
