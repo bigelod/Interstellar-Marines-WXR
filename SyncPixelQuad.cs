@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 public class SyncPixelQuad : MonoBehaviour
 {
@@ -18,17 +18,17 @@ public class SyncPixelQuad : MonoBehaviour
         Object.Destroy(quad.GetComponent<Collider>());
         quad.transform.parent = cam != null ? cam.transform : transform;
 
-        // Top-left corner: viewport (0,1) at near clip
+        // Top-left corner: viewport (0,1) at near clip - 10x10 px equivalent
         float near = cam != null ? cam.nearClipPlane + 0.05f : 0.3f;
-        Vector3 topLeft = new Vector3(0f, 1f, near);
         if (cam != null)
         {
-            topLeft = cam.ViewportToWorldPoint(topLeft);
-            // Convert to local space of camera
+            // Place in top-left corner of camera view
+            Vector3 topLeft = cam.ViewportToWorldPoint(new Vector3(0f, 1f, near));
             quad.transform.position = topLeft;
             quad.transform.rotation = cam.transform.rotation;
-            quad.transform.localPosition += new Vector3(0.15f, -0.15f, 0f); // inset from edge
-            quad.transform.localScale = new Vector3(0.03f, 0.03f, 1f);
+            // Inset slightly and small scale for 10x10 px
+            quad.transform.localPosition += new Vector3(0.06f, -0.06f, 0f);
+            quad.transform.localScale = new Vector3(0.025f, 0.025f, 1f);
         }
         else
         {
@@ -36,17 +36,16 @@ public class SyncPixelQuad : MonoBehaviour
             quad.transform.localScale = new Vector3(0.05f, 0.05f, 1f);
         }
 
-        // Unlit color material
+        // Unlit color material - use sRGB red shade
         Shader shader = Shader.Find("Unlit/Color");
         if (shader == null) shader = Shader.Find("Unlit/Texture");
         if (shader == null) shader = Shader.Find("Diffuse");
         mat = new Material(shader);
-        mat.color = Color.red;
+        mat.color = Color.black;
         quad.GetComponent<Renderer>().material = mat;
         quad.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         quad.GetComponent<Renderer>().receiveShadows = false;
-
-        // Keep on top
+        // Ensure it renders on top, no culling
         quad.layer = cam != null ? cam.gameObject.layer : 0;
     }
 
@@ -56,21 +55,27 @@ public class SyncPixelQuad : MonoBehaviour
         XRAPI.State state;
         if (XRAPI.GetBoolState(out state))
         {
-            // Flash based on frameId from SixDOFinator (even=red, odd=black) - standard sync pixel
-            if (state.frameId != lastFrameId)
+            // FIX: Map RGB Red 0-255 based on OpenXRFrameID per WinlatorXR spec
+            // WinlatorXR expects HMD_SYNC as shade of red in sRGB top-left 10x10 px
+            // HaloCEWXR uses D3DCOLOR_ARGB(255, OpenXRFrameID, 0, RenderEyeValue)
+            int frameId = state.frameId & 0xFF; // 0-255
+            if (frameId != lastFrameId)
             {
-                lastFrameId = state.frameId;
-                bool red = (state.frameId % 2) == 0;
-                mat.color = red ? Color.red : Color.black;
-                // Also toggle visibility every frame for HWXR style
+                lastFrameId = frameId;
+                // Map 0-255 -> 0.0-1.0 red channel, sRGB
+                float red = frameId / 255f;
+                // Use sRGB red - no gamma correction needed for Unlit/Color if in Gamma space
+                // If Linear space, we need to convert to linear or use gamma
+                mat.color = new Color(red, 0f, 0f, 1f);
                 quad.SetActive(true);
             }
         }
         else
         {
-            // Fallback: toggle based on Time.frameCount
-            bool red = (Time.frameCount % 2) == 0;
-            mat.color = red ? Color.red : Color.black;
+            // Fallback: cycle red based on Time.frameCount % 256
+            int frameId = Time.frameCount % 256;
+            float red = frameId / 255f;
+            mat.color = new Color(red, 0f, 0f, 1f);
         }
     }
 }

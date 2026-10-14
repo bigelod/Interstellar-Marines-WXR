@@ -28,15 +28,9 @@ public static class VRInput
 
     public static void UpdateFrame()
     {
-        uint lb;
-        uint rb;
-        Vector2 ls;
-        Vector2 rs;
-        float lt;
-        float rt;
-        float lg;
-        float rg;
-
+        uint lb, rb;
+        Vector2 ls, rs;
+        float lt, rt, lg, rg;
         XRAPI.XR_GetControllerState(XRAPI.LEFT, out lb, out ls, out lt, out lg);
         XRAPI.XR_GetControllerState(XRAPI.RIGHT, out rb, out rs, out rt, out rg);
         XRAPI.State state;
@@ -54,10 +48,18 @@ public static class VRInput
         Set("StrafeLeft", ls.x < -deadzone || state.lThumbLeft);
         Set("StrafeRight", ls.x > deadzone || state.lThumbRight);
 
-        var local = Character.AllCharacters != null ? Character.AllCharacters.FirstOrDefault(c => c != null && c.IsLocallyControlled) : null;
+        Character local = null;
+        if (Character.AllCharacters != null)
+        {
+            foreach (Character c in Character.AllCharacters)
+            {
+                if (c != null && c.IsLocallyControlled) { local = c; break; }
+            }
+        }
         if (local != null && Mathf.Abs(rs.x) > 0.01f)
         {
-            local.transform.Rotate(0, rs.x * VRManager.turnSpeed * Time.deltaTime, 0);
+            float speed = VRManager.turnSpeed;
+            local.transform.Rotate(0, rs.x * speed * Time.deltaTime, 0);
         }
 
         //Set("Next", rs.y > 0.7f || state.rThumbUp);
@@ -129,6 +131,7 @@ public static class VRInput
             }
             leftTrigHeld = true;
         }
+
         if (!state.lTrigger) { leftTrigHeld = false; Set("ToggleSilencer", false); }
 
         if (state.lTrigger)
@@ -162,6 +165,10 @@ public static class VRInput
         Set("GamepadSprint", state.lThumbPress);
         Set("GamepadMenu", state.lMenu);
         Set("MissionOverview", state.lMenu);
+
+        // Update VR/2D mode based on game state (title/paused = 2D)
+        try { XRAPI.UpdateVRModeFromGameState(); } catch { }
+
     }
 
     static void Set(string name, bool val) { overridesBool[name] = val; }
