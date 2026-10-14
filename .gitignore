@@ -109,3 +109,5 @@ InitTestScene*.unity*
 /[Aa]ssets/[Ss]ceneDependencyCache*
 /bin
 /Libs
+*.lnk
+/Release
