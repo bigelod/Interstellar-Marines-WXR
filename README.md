@@ -12,7 +12,8 @@ The text below is also written with help of Meta.AI and will be manually improve
 - `RangedWeapon.AttachToCamera()` -> `VRWeapon` puts weapon model at dominant hand, muzzle stays on body (anti-cheat safe, only rotation = hand rotation)
 - `InputManager` patched - VR overrides block keyboard/mouse for mapped actions, ESC/menus still work
 -  XrAPI UDP: listens `127.0.0.1:7872` (head + hands), sends `127.0.0.1:7278` `L_HAPTICS R_HAPTICS MODE_VR MODE_3D FOVX FOVY` for haptics + first-frame wakeup + 2D/VR auto switch
--  Red sync pixel quad top-left (10x10) flashing with `HMD_SYNC` frame ID for WinlatorXR pacing
+-  Red 
+pixel quad top-left (10x10) flashing with `HMD_SYNC` frame ID for WinlatorXR pacing
 
 Based on [WinlatorXR/SixDOFinator_SampleProject](https://github.com/WinlatorXR/SixDOFinator_SampleProject) and [HaloCEWXR docs](https://github.com/winlatorxr/halocewxr) for haptics/first-frame.
 

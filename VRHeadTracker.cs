@@ -98,6 +98,7 @@ public class VRHeadTracker : MonoBehaviour
                 {
                     if (ppb.profile.motionBlur != null) ppb.profile.motionBlur.enabled = false;
                     if (ppb.profile.chromaticAberration != null) ppb.profile.chromaticAberration.enabled = false;
+                    if (ppb.profile.depthOfField != null) ppb.profile.depthOfField.enabled = false;
                 }
             }
         }

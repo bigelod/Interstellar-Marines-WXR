@@ -24,14 +24,14 @@ class Helmet_InitFirstPersonCamera_Patch
             VRManagerLogger.LogInfo("[IMVR] Added VRHeadTracker");
         }
 
-        if (cam != null)
-        {
-            if (cam.GetComponent<SyncPixelQuad>() == null)
-            {
-                cam.gameObject.AddComponent<SyncPixelQuad>();
-                VRManagerLogger.LogInfo("[IMVR] Added SyncPixelQuad");
-            }
-        }
+        //if (cam != null)
+        //{
+        //    if (cam.GetComponent<SyncPixelQuad>() == null)
+        //    {
+        //        cam.gameObject.AddComponent<SyncPixelQuad>();
+        //        VRManagerLogger.LogInfo("[IMVR] Added SyncPixelQuad");
+        //    }
+        //}
 
     }
 }
