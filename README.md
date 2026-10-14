@@ -58,8 +58,11 @@ Mouse/Keyboard still works for unmapped: ESC, console, etc.
 
 `config.txt` next to dll:
 > dominant_hand=right
+>
 > turn_speed=45
+> 
 > deadzone=0.20
+> 
 > flipHands=0
 
 
