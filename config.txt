@@ -1,0 +1,5 @@
+# Interstellar Marines VR - UDP XrAPI (WinlatorXR)
+dominant_hand=right
+turn_speed=45
+deadzone=0.20
+hands_flip=0
