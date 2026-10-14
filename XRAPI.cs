@@ -304,6 +304,8 @@ public static class XRAPI
 
     public static void ForceVRMode()
     {
+        VRManagerLogger.isVRTime = true;
+
         //We know we're in VR for sure now
         modeVR = 1;
         mode3D = 0;
@@ -314,6 +316,8 @@ public static class XRAPI
 
     public static void UpdateVRModeFromGameState()
     {
+        if (VRManagerLogger.isVRTime) return;
+
         try{
             bool isInGame = false;
             bool isPaused = false;

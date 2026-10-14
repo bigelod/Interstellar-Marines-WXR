@@ -10,6 +10,8 @@ public static class VRManagerLogger
     public static Action<string> LogInfo;
     public static Action<string> LogWarn;
     public static Action<string> LogError;
+
+    public static bool isVRTime = false; //TEMP VALUE UNTIL BUGS FIXED
 }
 
 [BepInPlugin("im.vr.winlatorxr", "IMVR - Interstellar Marines WinlatorXR", "0.3.2")]
