@@ -51,8 +51,8 @@ Mouse/Keyboard still works for unmapped: ESC, console, etc.
 
 **Recommended user steps:**
 1. Install Interstellar Marines (Steam) via WinlatorXR's store mode
-2. Install **BepInEx 5** x86: download `BepInEx_x86_5.4.23.2.zip`, extract to game root (where `InterstellarMarines.exe` is). Ensure winhttp.dll is allowed to use native, built-in in Wine config, then run game once to generate `BepInEx/` folders. Close game.
-3. Download latest release `IMVR_WXR_vX.X.zip` from Releases
+2. Install **BepInEx 5** x86: download `BepInEx_win_x64_5.4.23.5.zip`, extract to game root (where `InterstellarMarines.exe` is). Ensure winhttp.dll is allowed to use native, built-in in Wine config, then run game once to generate `BepInEx/` folders. Close game.
+3. Download latest release `InterstellarMarinesWXR.zip` from Releases
 4. Extract release into game root - should place `BepInEx/plugins/IMVR/IMVRMod.dll` + `config.txt`
 5. Launch via WinlatorXR on Quest/Pico: use DXVK + Turnip, set resolution 1400x1400.
 
