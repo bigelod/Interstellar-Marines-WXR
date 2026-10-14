@@ -312,6 +312,14 @@ public static class XRAPI
     }
     public static bool GetBoolState(out State s){ lock(lockObj){ s=latest; return hasData; } }
 
+    public static void ForceVRMode()
+    {
+        //We know we're in VR for sure now
+        modeVR = 1;
+        mode3D = 0;
+        Debug.Log("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
+    }
+
     public static void UpdateVRModeFromGameState()
     {
         try{
@@ -319,42 +327,42 @@ public static class XRAPI
             bool isPaused = false;
 
             // Check if local character exists (in-game)
-            if(Character.AllCharacters!=null){
-                foreach(Character c in Character.AllCharacters){
-                    if(c!=null && c.IsLocallyControlled){
-                        isInGame = true;
-                        break;
-                    }
-                }
-            }
+            //if(Character.AllCharacters!=null){
+            //    foreach(Character c in Character.AllCharacters){
+            //        if(c!=null && c.IsLocallyControlled){
+            //            isInGame = true;
+            //            break;
+            //        }
+            //    }
+            //}
 
-            // Try to detect pause via reflection (PauseManager, GameManager, etc)
-            try{
-                var pauseType = HarmonyLib.AccessTools.TypeByName("PauseManager");
-                if(pauseType!=null){
-                    var prop = pauseType.GetProperty("IsPaused", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-                    if(prop!=null){
-                        object v = prop.GetValue(null, null);
-                        if(v is bool) isPaused = (bool)v;
-                    }
-                    var field = HarmonyLib.AccessTools.Field(pauseType, "isPaused");
-                    if(field!=null){
-                        object v = field.GetValue(null);
-                        if(v is bool) isPaused = isPaused || (bool)v;
-                    }
-                }
-            } catch{}
+            //// Try to detect pause via reflection (PauseManager, GameManager, etc)
+            //try{
+            //    var pauseType = HarmonyLib.AccessTools.TypeByName("PauseManager");
+            //    if(pauseType!=null){
+            //        var prop = pauseType.GetProperty("IsPaused", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            //        if(prop!=null){
+            //            object v = prop.GetValue(null, null);
+            //            if(v is bool) isPaused = (bool)v;
+            //        }
+            //        var field = HarmonyLib.AccessTools.Field(pauseType, "isPaused");
+            //        if(field!=null){
+            //            object v = field.GetValue(null);
+            //            if(v is bool) isPaused = isPaused || (bool)v;
+            //        }
+            //    }
+            //} catch{}
 
-            try{
-                var gmType = HarmonyLib.AccessTools.TypeByName("GameManager");
-                if(gmType!=null){
-                    var prop = gmType.GetProperty("IsPaused", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    if(prop!=null){
-                        object v = prop.GetValue(null, null);
-                        if(v is bool) isPaused = isPaused || (bool)v;
-                    }
-                }
-            } catch{}
+            //try{
+            //    var gmType = HarmonyLib.AccessTools.TypeByName("GameManager");
+            //    if(gmType!=null){
+            //        var prop = gmType.GetProperty("IsPaused", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            //        if(prop!=null){
+            //            object v = prop.GetValue(null, null);
+            //            if(v is bool) isPaused = isPaused || (bool)v;
+            //        }
+            //    }
+            //} catch{}
 
             // Also check if timeScale is 0 (paused) or cursor visible (menu)
             try{
