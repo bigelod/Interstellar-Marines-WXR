@@ -5,6 +5,7 @@ using System.Threading;
 using System.Text;
 using UnityEngine;
 using System.Globalization;
+using System.IO;
 
 public static class XRAPI
 {
@@ -15,7 +16,6 @@ public static class XRAPI
     static UdpClient sendClient;
 
     static Thread recvThread;
-    static Thread sendThread;
 
     static volatile bool running = false;
     static object lockObj = new object();
@@ -36,7 +36,6 @@ public static class XRAPI
 
     // Sending to WinlatorXR: 127.0.0.1:7278 format: L_HAPTICS R_HAPTICS MODE_VR MODE_3D FOVX FOVY
     static IPEndPoint sendEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 7278);
-    static IPEndPoint lastRemoteEndpoint = null;
     static int leftHapticFrames = 0;
     static int rightHapticFrames = 0;
     static int modeVR = 1; // 1 to enable VR, 2 for 2d non-vr
@@ -48,6 +47,37 @@ public static class XRAPI
     public static bool XR_Init()
     {
         if(running) return true;
+
+        string dataDirectory = "Z:/tmp/xr";
+
+        if (!Directory.Exists(dataDirectory))
+        {
+            if (Directory.Exists("Z:/tmp"))
+            {
+                Directory.CreateDirectory(dataDirectory);
+            }
+        }
+
+        if (Directory.Exists(dataDirectory))
+        {
+            string versionFile = dataDirectory + "/version";
+
+            if (!File.Exists(versionFile))
+            {
+                try
+                {
+                    using (StreamWriter sw = new StreamWriter(versionFile))
+                    {
+                        sw.WriteLine("0.4");
+                    }
+                }
+                catch
+                {
+
+                }
+            }
+        }
+
         foreach(int port in PORTS){
             try{
                 client = new UdpClient(port);
@@ -73,9 +103,6 @@ public static class XRAPI
         {
             sendClient = new UdpClient();
             running = true;
-            sendThread = new Thread(SendLoop);
-            sendThread.IsBackground = true;
-            sendThread.Start();
             SendFirstFrame();
         }
         catch { }
@@ -96,54 +123,12 @@ public static class XRAPI
             try{
                 byte[] data = client.Receive(ref any);
                 if(data==null || data.Length==0) continue;
-                string s = Encoding.UTF8.GetString(data).Trim();
+                string s = Encoding.ASCII.GetString(data).Trim();
                 ParseString(s);
             } catch(SocketException){
                 TryFileFallback();
             } catch(Exception e){
                 Debug.LogWarning("[IMVR] UDP error: "+e.Message);
-            }
-        }
-    }
-
-    static void SendLoop()
-    {
-        while (running)
-        {
-            try
-            {
-                // Format per WinlatorXR 0.3 spec: L_HAPTICS R_HAPTICS MODE_VR MODE_3D FOVX FOVY
-                // haptics = frames to vibrate
-                int l = leftHapticFrames;
-                int r = rightHapticFrames;
-                string msg = string.Format(CultureInfo.InvariantCulture, "{0} {1} {2} {3} {4} {5}", l, r, modeVR, mode3D, targetFovX, targetFovY);
-                byte[] bytes = Encoding.UTF8.GetBytes(msg);
-
-                // Send to primary WinlatorXR endpoint 127.0.0.1:7278
-                try { sendClient.Send(bytes, bytes.Length, sendEndpoint); } catch { }
-
-                // Also try to send back to last remote endpoint if different (some WinlatorXR builds listen on headset IP)
-                if (lastRemoteEndpoint != null)
-                {
-                    try
-                    {
-                        // Send to same IP but port 7278
-                        IPEndPoint alt = new IPEndPoint(lastRemoteEndpoint.Address, 7278);
-                        sendClient.Send(bytes, bytes.Length, alt);
-                    }
-                    catch { }
-                }
-
-                // Decrement haptics
-                if (leftHapticFrames > 0) leftHapticFrames--;
-                if (rightHapticFrames > 0) rightHapticFrames--;
-
-                Thread.Sleep(11); // ~90hz
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning("[IMVR] Send loop error: " + e.Message);
-                Thread.Sleep(100);
             }
         }
     }
@@ -156,18 +141,12 @@ public static class XRAPI
             mode3D = 0; // mono for Interstellar Marines
             leftHapticFrames = 0;
             rightHapticFrames = 0;
-            string msg = string.Format(CultureInfo.InvariantCulture, "{0} {1} {2} {3} {4} {5}", 0, 0, modeVR, mode3D, targetFovX, targetFovY);
-            byte[] bytes = Encoding.UTF8.GetBytes(msg);
+            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 2 0 104.5 104.5");
+            byte[] bytes = Encoding.ASCII.GetBytes(msg);
             if (sendClient != null)
             {
                 sendClient.Send(bytes, bytes.Length, sendEndpoint);
                 Debug.Log("[IMVR] Sent first frame to awaken WinlatorXR: " + msg);
-                // Send a few times to ensure wake
-                for (int i = 0; i < 5; i++)
-                {
-                    sendClient.Send(bytes, bytes.Length, sendEndpoint);
-                    Thread.Sleep(10);
-                }
             }
         }
         catch (Exception e)
@@ -186,13 +165,27 @@ public static class XRAPI
         int f = Mathf.Clamp(frames, 0, 100);
         if (hand == LEFT) leftHapticFrames = Mathf.Max(leftHapticFrames, f);
         else rightHapticFrames = Mathf.Max(rightHapticFrames, f);
+
+        SendHapticUpdate();
     }
 
     public static void SendHapticBoth(int leftFrames, int rightFrames)
     {
         leftHapticFrames = Mathf.Max(leftHapticFrames, leftFrames);
         rightHapticFrames = Mathf.Max(rightHapticFrames, rightFrames);
+
+        SendHapticUpdate();
     }
+
+    public static void SendHapticUpdate()
+    {
+        string msg = string.Format(CultureInfo.InvariantCulture, "0 0 " + modeVR.ToString() + " " + mode3D.ToString() + " 104.5 104.5");
+        byte[] bytes = Encoding.ASCII.GetBytes(msg);
+        if (sendClient != null)
+        {
+            sendClient.Send(bytes, bytes.Length, sendEndpoint);
+        }
+    }   
 
 
     static void TryFileFallback()
@@ -318,6 +311,8 @@ public static class XRAPI
         modeVR = 1;
         mode3D = 0;
         Debug.Log("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
+
+        SendHapticUpdate();
     }
 
     public static void UpdateVRModeFromGameState()
