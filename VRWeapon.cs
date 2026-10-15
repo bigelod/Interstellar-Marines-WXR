@@ -28,10 +28,10 @@ public class VRWeapon : MonoBehaviour
         p = new Vector3(p.x, p.y, -p.z);
 
         // 3. Fix 180° backwards
-        r = r * Quaternion.Euler(0f, 180f, 0f);
+        //r = r * Quaternion.Euler(0f, 180f, 0f);
 
         // Known bug: Quest 3 vs Pico 4 Ultra hands are 180deg rolled
-        if (VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
+        if (!VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
         // 5. HMD-local -> world (app sends local to HMD)
         Transform refT = VRHeadTracker.VRRoot;
         Transform origin = refT != null ? refT.parent : null;

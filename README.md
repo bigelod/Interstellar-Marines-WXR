@@ -23,7 +23,7 @@ Based on [WinlatorXR/SixDOFinator_SampleProject](https://github.com/WinlatorXR/S
 - Weapon model at controller, logical fire from body
 - Right stick up/down cycles Slot01->Slot02->Slot03 loop
 - Haptics on shoot (right controller 6-8 frames)
-- Auto 2D when not in-game: title screen / paused / no local character = `MODE_VR=2` flat screen, in-game = `MODE_VR=1`
+- Auto 2D when not in-game: title screen / paused / no local character = `MODE_VR=0` flat screen, in-game = `MODE_VR=1`
 - Post-processing disabled for VR: motionBlur, chromaticAberration, depthOfField
 - Keyboard/mouse blocked for mapped VR inputs (prevents double-move)
 

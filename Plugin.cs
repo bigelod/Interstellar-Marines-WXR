@@ -4,15 +4,18 @@ using BepInEx;
 using HarmonyLib;
 using UnityEngine;
 
+public static class VRManagerState
+{
+    public static bool inVR = false;
+    public static bool isSetup = false;
+}
+
 public static class VRManagerLogger
 {
     public static Action<string> LogDebug;
     public static Action<string> LogInfo;
     public static Action<string> LogWarn;
     public static Action<string> LogError;
-
-    public static bool isVRTime = false; //TEMP VALUE UNTIL BUGS FIXED
-    public static bool isSetupAlready = false;
 }
 
 [BepInPlugin("im.vr.winlatorxr", "IMVR - Interstellar Marines WinlatorXR", "0.3.2")]
@@ -25,6 +28,19 @@ public class VRManager : BaseUnityPlugin
 
     void Awake()
     {
+        // Unity 4 compat - BepInEx thinks isBatchMode exists
+        try
+        {
+            var prop = typeof(UnityEngine.Application).GetProperty("isBatchMode");
+            if (prop == null)
+            {
+                Debug.Log("[IMVR] Patching missing isBatchMode check - ignoring");
+                // Tell BepInEx chainloader to skip batchmode check by setting env var
+                System.Environment.SetEnvironmentVariable("BEPINEX_BATCH_CHECK", "0");
+            }
+        }
+        catch { }
+
         VRManagerLogger.LogInfo = LogDebug;
         VRManagerLogger.LogWarn = LogWarn;
         VRManagerLogger.LogError = LogError;

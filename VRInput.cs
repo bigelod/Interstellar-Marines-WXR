@@ -10,10 +10,14 @@ public static class VRInput
     static float leftHoldTime = 0f;
     static float deadzone = 0.2f;
 
+    static float aHoldTime = 0f;
+
     static bool aHeld = false;
     static bool bHeld = false;
     static bool xHeld = false;
     static bool yHeld = false;
+
+    static bool flashlightOn = false;
 
     static float holdTriggerCooldown = 0f;
 
@@ -62,9 +66,6 @@ public static class VRInput
             local.transform.Rotate(0, rs.x * speed * Time.deltaTime, 0);
         }
 
-        //Set("Next", rs.y > 0.7f || state.rThumbUp);
-        //Set("Previous", rs.y < -0.7f || state.rThumbDown);
-
         if (!slotInitialized)
         {
             currentSlot = 1;
@@ -81,21 +82,21 @@ public static class VRInput
         {
             if (stickUp && !rightStickUpHeld)
             {
-                // Up = next slot: 1->2, 2->3, 3->1
+                // Up = next slot
                 currentSlot++;
                 if (currentSlot > 3) currentSlot = 1;
                 SetSlot(currentSlot);
                 lastSlotSwitch = Time.time;
-                VRManagerLogger.LogInfo("[IMVR] Slot up -> Slot0" + currentSlot);
+                //VRManagerLogger.LogInfo("[IMVR] Slot up -> Slot0" + currentSlot);
             }
             else if (stickDown && !rightStickDownHeld)
             {
-                // Down = prev slot: 1->3, 3->2, 2->1
+                // Down = prev slot
                 currentSlot--;
                 if (currentSlot < 1) currentSlot = 3;
                 SetSlot(currentSlot);
                 lastSlotSwitch = Time.time;
-                VRManagerLogger.LogInfo("[IMVR] Slot down -> Slot0" + currentSlot);
+                //VRManagerLogger.LogInfo("[IMVR] Slot down -> Slot0" + currentSlot);
             }
         }
         rightStickUpHeld = stickUp;
@@ -106,17 +107,34 @@ public static class VRInput
 
         Set("Fire", state.rTrigger || rt > 0.5f);
 
-        Set("Use", state.rA && !aHeld);
-        Set("GamepadUse", state.rA && !aHeld);
+
+
+        Set("Use", (state.rA && !aHeld) || aHoldTime > 0.6f);
+        Set("GamepadUse", (state.rA && !aHeld) || aHoldTime > 0.6f);
+
         Set("Reload", state.rB && !bHeld);
         Set("GamepadReload", state.rB && !bHeld);
         Set("ToggleHelmet", state.lX && !xHeld);
-        Set("ToggleFlashlight", state.lY && !yHeld);
+        Set("ToggleFlashlight", flashlightOn);
+
+        if (state.lY && !yHeld)
+        {
+            flashlightOn = !flashlightOn;
+        }
 
         aHeld = state.rA;
         bHeld = state.rB;
         xHeld = state.lX;
         yHeld = state.lY;
+
+        if (aHeld)
+        {
+            aHoldTime += Time.deltaTime;
+        }
+        else
+        {
+            aHoldTime = 0f;
+        }
 
         if (state.lTrigger && !leftTrigHeld)
         {

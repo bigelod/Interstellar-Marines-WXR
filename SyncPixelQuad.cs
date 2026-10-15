@@ -73,9 +73,9 @@ public class SyncPixelQuad : MonoBehaviour
         else
         {
             // Fallback: cycle red based on Time.frameCount % 256
-            int frameId = Time.frameCount % 256;
-            float red = frameId / 255f;
-            mat.color = new Color(red, 0f, 0f, 1f);
+            //int frameId = Time.frameCount % 256;
+            //float red = frameId / 255f;
+            //mat.color = new Color(red, 0f, 0f, 1f);
         }
     }
 }

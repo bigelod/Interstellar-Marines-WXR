@@ -16,7 +16,7 @@ public static class XRAPI
     static UdpClient sendClient;
 
     static Thread recvThread;
-    
+
     static object lockObj = new object();
 
     public struct State
@@ -38,7 +38,7 @@ public static class XRAPI
     static IPEndPoint sendEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 7278);
     static int leftHapticFrames = 0;
     static int rightHapticFrames = 0;
-    static int modeVR = 1; // 1 to enable VR, 2 for 2d non-vr
+    static int modeVR = 1; // 1 to enable VR, 0 to disable VR
     static int mode3D = 0; // 0 mono for IM, 1 SBS, 2 AER
     static float targetFovX = 104.5f;
     static float targetFovY = 104.5f;
@@ -46,7 +46,9 @@ public static class XRAPI
 
     public static void XR_Init()
     {
-        if (VRManagerLogger.isSetupAlready) ;
+        if (client == null || sendClient == null) VRManagerState.isSetup = false;
+
+        if (VRManagerState.isSetup) return;
 
         string dataDirectory = "Z:/tmp/xr";
 
@@ -78,37 +80,43 @@ public static class XRAPI
             }
         }
 
-        foreach (int port in PORTS)
+        if (client == null)
         {
-            try
+            foreach (int port in PORTS)
             {
-                client = new UdpClient(port);
-                client.Client.ReceiveTimeout = 500;
-                recvThread = new Thread(RecvLoopParam);
-                recvThread.IsBackground = true;
-                recvThread.Start(port);
-                VRManagerLogger.LogInfo("[IMVR] UDP listening on " + port);
-                latest.headRot = Quaternion.identity;
-                latest.leftRot = Quaternion.identity;
-                latest.rightRot = Quaternion.identity;
-                break;
-            }
-            catch (Exception e)
-            {
-                VRManagerLogger.LogWarn("[IMVR] Port " + port + " busy: " + e.Message);
-                try { if (client != null) client.Close(); } catch { }
+                try
+                {
+                    client = new UdpClient(port);
+                    client.Client.ReceiveTimeout = 500;
+                    recvThread = new Thread(RecvLoopParam);
+                    recvThread.IsBackground = true;
+                    recvThread.Start(port);
+                    VRManagerLogger.LogInfo("[IMVR] UDP Rx listening on " + port);
+                    latest.headRot = Quaternion.identity;
+                    latest.leftRot = Quaternion.identity;
+                    latest.rightRot = Quaternion.identity;
+                    break;
+                }
+                catch (Exception e)
+                {
+                    VRManagerLogger.LogWarn("[IMVR] UDP Rx Port " + port + " busy: " + e.Message);
+                    try { if (client != null) client.Close(); } catch { }
+                }
             }
         }
 
         // Still start sender even if receiver failed
         try
         {
-            sendClient = new UdpClient();
+            if (sendClient == null)
+            {
+                sendClient = new UdpClient();
+            }
             SendFirstFrame();
         }
         catch { }
 
-        VRManagerLogger.isSetupAlready = true;
+        VRManagerState.isSetup = true;
     }
 
     static void RecvLoopParam(object obj)
@@ -131,36 +139,38 @@ public static class XRAPI
             }
             catch (SocketException)
             {
-                VRManagerLogger.LogWarn("[IMVR] No UDP port, checking D:/xrtemp fallback");
-                TryFileFallback();
+                VRManagerLogger.LogWarn("[IMVR] UDP Rx port failed, will try again");
             }
             catch (Exception e)
             {
-                VRManagerLogger.LogWarn("[IMVR] UDP error: " + e.Message);
+                VRManagerLogger.LogWarn("[IMVR] UDP Rx fatal error: " + e.Message + " . Restarting XrAPI...");
+                XR_Init();
             }
         }
     }
 
     public static void SendFirstFrame()
     {
-        //try
-        //{
-        //    modeVR = 1;
-        //    mode3D = 0; // mono for Interstellar Marines
-        //    leftHapticFrames = 0;
-        //    rightHapticFrames = 0;
-        //    string msg = string.Format(CultureInfo.InvariantCulture, "0 0 1 0 104.5 104.5");
-        //    byte[] bytes = Encoding.ASCII.GetBytes(msg);
-        //    if (sendClient != null)
-        //    {
-        //        sendClient.Send(bytes, bytes.Length, sendEndpoint);
-        //        VRManagerLogger.LogInfo("[IMVR] Sent first frame to awaken WinlatorXR: " + msg);
-        //    }
-        //}
-        //catch (Exception e)
-        //{
-        //    VRManagerLogger.LogWarn("[IMVR] SendFirstFrame failed: " + e.Message);
-        //}
+        try
+        {
+            VRManagerState.inVR = false;
+            modeVR = 0;
+            mode3D = 0; // mono for Interstellar Marines
+            leftHapticFrames = 0;
+            rightHapticFrames = 0;
+            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 0 0 104.5 104.5");
+            byte[] bytes = Encoding.ASCII.GetBytes(msg);
+            if (sendClient != null)
+            {
+                sendClient.Send(bytes, bytes.Length, sendEndpoint);
+                VRManagerLogger.LogInfo("[IMVR] UDP Sent first frame to awaken WinlatorXR: " + msg);
+            }
+        }
+        catch (Exception e)
+        {
+            VRManagerLogger.LogWarn("[IMVR] UDP SendFirstFrame failed: " + e.Message + " . Restarting XrAPI...");
+            XR_Init();
+        }
     }
 
     public static void SendHapticVibration(int hand, int frames)
@@ -187,31 +197,20 @@ public static class XRAPI
 
     public static void SendHapticUpdate()
     {
-        string msg = string.Format(CultureInfo.InvariantCulture, "0 0 " + modeVR.ToString() + " " + mode3D.ToString() + " 104.5 104.5");
-        byte[] bytes = Encoding.ASCII.GetBytes(msg);
-        if (sendClient != null)
-        {
-            sendClient.Send(bytes, bytes.Length, sendEndpoint);
-        }
-    }
-
-
-    static void TryFileFallback()
-    {
         try
         {
-            string[] dirs = new string[] { "D:/xrtemp", "C:/xrtemp", "./xrtemp" };
-            foreach (string dir in dirs)
+            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 " + modeVR.ToString() + " " + mode3D.ToString() + " 104.5 104.5");
+            byte[] bytes = Encoding.ASCII.GetBytes(msg);
+            if (sendClient != null)
             {
-                if (!System.IO.Directory.Exists(dir)) continue;
-                string[] files = System.IO.Directory.GetFiles(dir);
-                if (files.Length == 0) continue;
-                string name = System.IO.Path.GetFileName(files[0]);
-                ParseString(name);
-                return;
+                sendClient.Send(bytes, bytes.Length, sendEndpoint);
             }
         }
-        catch { }
+        catch (Exception e)
+        {
+            VRManagerLogger.LogWarn("[IMVR] UDP Send failed: " + e.Message + " . Restarting XrAPI...");
+            XR_Init();
+        }
     }
 
     static void ParseString(string s)
@@ -263,7 +262,7 @@ public static class XRAPI
         }
         catch (Exception e)
         {
-            VRManagerLogger.LogWarn("[IMVR] Parse fail: " + e.Message);
+            VRManagerLogger.LogWarn("[IMVR] UDP Rx Parse fail: " + e.Message);
         }
     }
 
@@ -332,7 +331,7 @@ public static class XRAPI
 
     public static void ForceVRMode()
     {
-        VRManagerLogger.isVRTime = true;
+        VRManagerState.inVR = true;
 
         //We know we're in VR for sure now
         modeVR = 1;
@@ -344,57 +343,52 @@ public static class XRAPI
 
     public static void UpdateVRModeFromGameState()
     {
-        if (VRManagerLogger.isVRTime)
-        {
-            SendHapticUpdate();
-
-            return;
-        }
-
         try
         {
-            bool isInGame = false;
+            bool isInGame = VRManagerState.inVR;
             bool isPaused = false;
 
             // Check if local character exists (in-game)
-            //if(Character.AllCharacters!=null){
-            //    foreach(Character c in Character.AllCharacters){
-            //        if(c!=null && c.IsLocallyControlled){
-            //            isInGame = true;
-            //            break;
-            //        }
-            //    }
-            //}
+            if (Character.AllCharacters != null)
+            {
+                foreach (Character c in Character.AllCharacters)
+                {
+                    if (c != null && c.IsLocallyControlled)
+                    {
+                        isInGame = true;
+                        break;
+                    }
+                }
+            }
 
-            //// Try to detect pause via reflection (PauseManager, GameManager, etc)
-            //try{
-            //    var pauseType = HarmonyLib.AccessTools.TypeByName("PauseManager");
-            //    if(pauseType!=null){
-            //        var prop = pauseType.GetProperty("IsPaused", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-            //        if(prop!=null){
-            //            object v = prop.GetValue(null, null);
-            //            if(v is bool) isPaused = (bool)v;
-            //        }
-            //        var field = HarmonyLib.AccessTools.Field(pauseType, "isPaused");
-            //        if(field!=null){
-            //            object v = field.GetValue(null);
-            //            if(v is bool) isPaused = isPaused || (bool)v;
-            //        }
-            //    }
-            //} catch{}
+            try
+            {
+                bool cursorVisible = Cursor.visible;
+                bool cursorLocked = Cursor.lockState == CursorLockMode.Locked;
 
-            //try{
-            //    var gmType = HarmonyLib.AccessTools.TypeByName("GameManager");
-            //    if(gmType!=null){
-            //        var prop = gmType.GetProperty("IsPaused", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            //        if(prop!=null){
-            //            object v = prop.GetValue(null, null);
-            //            if(v is bool) isPaused = isPaused || (bool)v;
-            //        }
-            //    }
-            //} catch{}
+                if (GameManager.Instance != null)
+                {
+                    // RunningGame = actually in level, not main menu
+                    isInGame = GameManager.IsRunningGame && Marine.LocalMarine != null && Marine.LocalMarine.IsAlive;
 
-            // Also check if timeScale is 0 (paused) or cursor visible (menu)
+                    // This is the same pause GameManager uses for Escape menu
+                    isPaused = GameManager.IsPaused;
+                }
+
+                if (cursorVisible && !cursorLocked)
+                {
+                    isPaused = true;
+                }
+
+                // Fallback if GameManager not ready yet (main menu)
+                if (!isInGame)
+                {
+                    isPaused = true;
+                }
+            }
+            catch { }
+
+            // Also check if timeScale is 0 (paused)
             try
             {
                 if (UnityEngine.Time.timeScale == 0f) isPaused = true;
@@ -404,15 +398,17 @@ public static class XRAPI
             // If not in-game (title screen, main menu) or paused -> 2D screen mode
             if (!isInGame || isPaused)
             {
-                if (modeVR != 2)
+                VRManagerState.inVR = false;
+                if (modeVR != 0)
                 {
-                    VRManagerLogger.LogInfo("[IMVR] Switching to 2D UI mode (MODE_VR=2) - not in-game or paused. isInGame=" + isInGame + " isPaused=" + isPaused);
+                    VRManagerLogger.LogInfo("[IMVR] Switching to 2D UI mode (MODE_VR=0) - not in-game or paused. isInGame=" + isInGame + " isPaused=" + isPaused);
                 }
-                modeVR = 2; // Non-VR / 2D screen mode per WinlatorXR spec
+                modeVR = 0; // Non-VR / 2D screen mode per WinlatorXR spec
                 mode3D = 0; // flat
             }
             else
             {
+                VRManagerState.inVR = true;
                 if (modeVR != 1)
                 {
                     VRManagerLogger.LogInfo("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
@@ -423,11 +419,14 @@ public static class XRAPI
         }
         catch (Exception e)
         {
+            VRManagerState.inVR = true;
             // Fallback: stay in VR mode
             VRManagerLogger.LogWarn("[IMVR] UpdateVRMode failed: " + e.Message);
             modeVR = 1;
             mode3D = 0;
         }
+
+        SendHapticUpdate();
     }
 
 
