@@ -8,6 +8,8 @@ public static class VRManagerState
 {
     public static bool inVR = false;
     public static bool isSetup = false;
+    public static int rxTxFailCount = 0;
+    public static int rxTxFailMaxRetry = 5;
 }
 
 public static class VRManagerLogger

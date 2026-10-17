@@ -46,6 +46,11 @@ public static class XRAPI
 
     public static void XR_Init()
     {
+        if (VRManagerState.rxTxFailCount > VRManagerState.rxTxFailMaxRetry)
+        {
+            return;
+        }
+
         if (client == null || sendClient == null) VRManagerState.isSetup = false;
 
         if (VRManagerState.isSetup) return;
@@ -144,6 +149,7 @@ public static class XRAPI
             catch (Exception e)
             {
                 VRManagerLogger.LogWarn("[IMVR] UDP Rx fatal error: " + e.Message + " . Restarting XrAPI...");
+                VRManagerState.rxTxFailMaxRetry += 1;
                 XR_Init();
             }
         }
@@ -169,6 +175,7 @@ public static class XRAPI
         catch (Exception e)
         {
             VRManagerLogger.LogWarn("[IMVR] UDP SendFirstFrame failed: " + e.Message + " . Restarting XrAPI...");
+            VRManagerState.rxTxFailMaxRetry += 1;
             XR_Init();
         }
     }
@@ -209,6 +216,7 @@ public static class XRAPI
         catch (Exception e)
         {
             VRManagerLogger.LogWarn("[IMVR] UDP Send failed: " + e.Message + " . Restarting XrAPI...");
+            VRManagerState.rxTxFailMaxRetry += 1;
             XR_Init();
         }
     }
@@ -331,6 +339,8 @@ public static class XRAPI
 
     public static void ForceVRMode()
     {
+        VRManagerState.rxTxFailCount = 0;
+
         VRManagerState.inVR = true;
 
         //We know we're in VR for sure now

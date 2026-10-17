@@ -244,18 +244,6 @@ class Helmet_VR_NoBob
     }
 }
 
-[HarmonyPatch(typeof(Helmet), "SetRenderMode")]
-class Helmet_VR_NearClip_2
-{
-    static void Postfix(Camera ___playerCamera)
-    {
-        if (VRManagerState.inVR && ___playerCamera != null)
-        {
-            ___playerCamera.nearClipPlane = 0.18f;
-        }
-    }
-}
-
 // FLASHLIGHT - patch LateUpdate, not Update
 [HarmonyPatch(typeof(WeaponLight), "LateUpdate")]
 class WeaponLight_VR_Head
@@ -346,8 +334,8 @@ class Helmet_VR_NearClip
         }
         if (___visorTransform != null)
         {
-            ___visorTransform.localPosition = ___helmetInitialOffset + new Vector3(0f, 0f, 0.14f);
-            ___visorTransform.localScale = new Vector3(0.85f, 0.85f, 0.85f);
+            ___visorTransform.localPosition = ___helmetInitialOffset + new Vector3(0f, 0f, 0.06f);
+            ___visorTransform.localScale = Vector3.one;
         }
     }
 }
