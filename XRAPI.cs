@@ -9,6 +9,8 @@ using System.IO;
 
 public static class XRAPI
 {
+    static volatile bool shouldExit = false;
+
     public const int LEFT = 0, RIGHT = 1;
     public const uint BTN_A = 1u << 0, BTN_B = 1u << 1, BTN_X = 1u << 2, BTN_Y = 1u << 3, BTN_THUMB = 1u << 4, BTN_MENU = 1u << 5, BTN_GRIP = 1u << 6;
 
@@ -46,8 +48,11 @@ public static class XRAPI
 
     public static void XR_Init()
     {
+        if (shouldExit) return;
+
         if (VRManagerState.rxTxFailCount > VRManagerState.rxTxFailMaxRetry)
         {
+            Debug.Log("[IMVR] XrAPI Restart: Max retries hit, giving up");
             return;
         }
 
@@ -89,6 +94,8 @@ public static class XRAPI
         {
             foreach (int port in PORTS)
             {
+                try { if (recvThread != null) recvThread.Abort(); } catch (Exception e) { }
+
                 try
                 {
                     client = new UdpClient(port);
@@ -133,24 +140,35 @@ public static class XRAPI
     static void RecvLoop(int port)
     {
         IPEndPoint any = new IPEndPoint(IPAddress.Any, 0);
-        while (true)
+        while (client != null && any != null && VRManagerState.rxTxFailCount <= VRManagerState.rxTxFailMaxRetry)
         {
             try
             {
                 byte[] data = client.Receive(ref any);
                 if (data == null || data.Length == 0) continue;
+                VRManagerState.rxTxFailCount = 0;
                 string s = Encoding.ASCII.GetString(data).Trim();
                 ParseString(s);
             }
             catch (SocketException)
             {
+                if (shouldExit) break;
                 VRManagerLogger.LogWarn("[IMVR] UDP Rx port failed, will try again");
+                continue;
             }
             catch (Exception e)
             {
+                if (shouldExit) break;
                 VRManagerLogger.LogWarn("[IMVR] UDP Rx fatal error: " + e.Message + " . Restarting XrAPI...");
-                VRManagerState.rxTxFailMaxRetry += 1;
+                VRManagerState.rxTxFailCount += 1;
+
+                try { if (client != null) client.Close(); } catch { client = null; }
+                try { if (sendClient != null) sendClient.Close(); } catch { sendClient = null; }
+                VRManagerState.isSetup = false;
+
+                Thread.Sleep(500);
                 XR_Init();
+                break;
             }
         }
     }
@@ -175,7 +193,36 @@ public static class XRAPI
         catch (Exception e)
         {
             VRManagerLogger.LogWarn("[IMVR] UDP SendFirstFrame failed: " + e.Message + " . Restarting XrAPI...");
-            VRManagerState.rxTxFailMaxRetry += 1;
+            VRManagerState.rxTxFailCount += 1;
+
+            try { if (client != null) client.Close(); } catch { client = null; }
+            try { if (sendClient != null) sendClient.Close(); } catch { sendClient = null; }
+            VRManagerState.isSetup = false;
+
+            XR_Init();
+        }
+    }
+
+    public static void SendHapticUpdate()
+    {
+        try
+        {
+            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 " + modeVR.ToString() + " " + mode3D.ToString() + " 104.5 104.5");
+            byte[] bytes = Encoding.ASCII.GetBytes(msg);
+            if (sendClient != null)
+            {
+                sendClient.Send(bytes, bytes.Length, sendEndpoint);
+            }
+        }
+        catch (Exception e)
+        {
+            VRManagerLogger.LogWarn("[IMVR] UDP Send failed: " + e.Message + " . Restarting XrAPI...");
+            VRManagerState.rxTxFailCount += 1;
+
+            try { if (client != null) client.Close(); } catch { client = null; }
+            try { if (sendClient != null) sendClient.Close(); } catch { sendClient = null; }
+            VRManagerState.isSetup = false;
+
             XR_Init();
         }
     }
@@ -200,25 +247,6 @@ public static class XRAPI
         rightHapticFrames = Mathf.Max(rightHapticFrames, rightFrames);
 
         SendHapticUpdate();
-    }
-
-    public static void SendHapticUpdate()
-    {
-        try
-        {
-            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 " + modeVR.ToString() + " " + mode3D.ToString() + " 104.5 104.5");
-            byte[] bytes = Encoding.ASCII.GetBytes(msg);
-            if (sendClient != null)
-            {
-                sendClient.Send(bytes, bytes.Length, sendEndpoint);
-            }
-        }
-        catch (Exception e)
-        {
-            VRManagerLogger.LogWarn("[IMVR] UDP Send failed: " + e.Message + " . Restarting XrAPI...");
-            VRManagerState.rxTxFailMaxRetry += 1;
-            XR_Init();
-        }
     }
 
     static void ParseString(string s)
@@ -339,8 +367,6 @@ public static class XRAPI
 
     public static void ForceVRMode()
     {
-        VRManagerState.rxTxFailCount = 0;
-
         VRManagerState.inVR = true;
 
         //We know we're in VR for sure now
@@ -440,5 +466,12 @@ public static class XRAPI
     }
 
 
-    public static void Shutdown() { try { if (client != null) client.Close(); } catch { } try { if (recvThread != null) recvThread.Abort(); } catch { } }
+    public static void Shutdown()
+    {
+        VRManagerLogger.LogWarn("[IMVR] Shutdown received, closing");
+        shouldExit = true;
+        try { if (client != null) client.Close(); } catch { }
+        try { if (sendClient != null) sendClient.Close(); } catch { }
+        try { if (recvThread != null) recvThread.Abort(); } catch { }
+    }
 }

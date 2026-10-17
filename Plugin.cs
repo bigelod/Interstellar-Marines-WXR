@@ -112,4 +112,6 @@ public class VRManager : BaseUnityPlugin
             VRManagerLogger.LogError("[IMVR] Config error: "+e);
         }
     }
+
+    void OnApplicationQuit() { XRAPI.Shutdown(); }
 }
