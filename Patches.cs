@@ -75,9 +75,53 @@ class Helmet_InitFirstPersonCamera_Patch
         {
             cam.gameObject.AddComponent<SyncPixelQuad>();
         }
-        // Attach VRHUDAnchor to HUDCamera once - HUDCamera is its own Camera (HUDCamera.cs: myCamera), not child of Helmet
+        // GRAPHICAL ONLY - NOT TRACKING: Hide the opaque 1p helmet mesh that sits below the VR camera.
+        // Dump: CH_Marine1pHelmet (layer 8) + CH_Marine1pHelmetGlass (layer 8) are children of Helmet -> Root -> Helmet, NOT of WorldCamera.
+        // WorldCamera (VR camera) is at (0.1,0.2,-0.2) above helmet center, so in VR you see the helmet mesh as a huge black disc on the left / below you (second screenshot).
+        // In flat mode you need it for the visor frame, in VR the headset IS the visor, so it must be hidden. Keep layer 14 glass HUD (CH_Marine1pHelmetGlass_HUD) - that IS the neon HUD, rendered by HelmetCamera.
+        try {
+            MonoBehaviour helmMB = __instance as MonoBehaviour;
+            if (helmMB != null) {
+                Transform helmRoot = helmMB.transform;
+                // Find all renderers under Helmet and disable only the opaque helmet meshes (layer 8)
+                Renderer[] allR = helmRoot.GetComponentsInChildren<Renderer>(true);
+                for (int i=0;i<allR.Length;i++) {
+                    Renderer r = allR[i];
+                    if (r == null) continue;
+                    string rn = r.gameObject.name;
+                    if (r.gameObject.layer == 8 && (rn.Contains("CH_Marine1pHelmet") && !rn.Contains("Glass_HUD"))) {
+                        r.enabled = false;
+                    }
+                }
+                // Also hide HelmetOccluder (layer 14, Invisible_ShadowCaster) - it occludes world in VR and makes the black disc worse
+                // Do NOT hide CH_Marine1pHelmetGlass_HUD (layer 14, mat CH_1pHelmet_HUD_NGUI) - that is the neon green HUD surface
+            }
+        } catch { }
+        // FIXED7: Glued HUD mesh, not camera anchor. NGUI camera stays at UI root (flicker was from moving it).
+        // Parent the glass HUD mesh to VR camera, like it was parented to helmet in flat mode.
         try {
             if (HUDCamera.Instance != null && HUDCamera.Instance.GetComponent<VRHUDAnchor>() == null) HUDCamera.Instance.gameObject.AddComponent<VRHUDAnchor>();
+        } catch { }
+        try {
+            MonoBehaviour helmMB = __instance as MonoBehaviour;
+            if (helmMB != null && cam != null) {
+                Transform[] allT = helmMB.GetComponentsInChildren<Transform>(true);
+                for (int i=0;i<allT.Length;i++) {
+                    Transform t = allT[i];
+                    if (t == null) continue;
+                    // CH_Marine1pHelmetGlass_HUD is the neon HUD surface - layer 14, mat CH_1pHelmet_HUD_NGUI
+                    if (t.gameObject.layer == 14 && t.name.Contains("Glass_HUD")) {
+                        // Keep damage logic: Helmet component still controls material/texture, only parent changes
+                        // SetParent to WorldCamera (VR head) with local 0 - glued like flat mode helmet attachment
+                        if (t.parent != cam.transform) {
+                            t.SetParent(cam.transform, false);
+                            t.localPosition = Vector3.zero;
+                            t.localRotation = Quaternion.identity;
+                            // Keep original scale from dump (1,1,0.8) - SetParent(false) preserves local scale, don't force to 1
+                        }
+                    }
+                }
+            }
         } catch { }
 
         // SyncPixelQuad finds top camera itself - do NOT add to all cameras here
@@ -124,15 +168,21 @@ class InputManager_IsInput_Patch
         // FIX 5 - Allow mouse in menus/paused, block only in VR gameplay
         // XRAPI.UpdateVRModeFromGameState already sets inVR=false when paused,
         // but check again here: LocalMarine null OR GameManager.IsPaused OR Cursor visible = menu
+        // FIX: Do NOT check Cursor.visible - in Winlator the cursor is ALWAYS visible even in-game, so that check let mouse+keyboard through always.
+        // Only allow when actually in a menu: LocalMarine null, paused, or a menu UI is open. In VR gameplay, block everything.
         if (!VRManagerState.inVR) return true;
         if (Marine.LocalMarine == null) return true;
         try { if (GameManager.IsPaused) return true; } catch { }
-        try { if (Cursor.visible && Cursor.lockState != CursorLockMode.Locked) return true; } catch { }
         string name = ""; if (keyBind != null) name = keyBind.ToString();
+        // VR overrides win - if VR stick/button says this input is true, allow it
         bool v; if (VRInput.overridesBool.TryGetValue(name, out v) && v) { __result = true; return false; }
         if (name.Contains("Menu") || name.Contains("Confirm") || name.Contains("Cancel") || name.Contains("Pause") || name.Contains("Back") || name.Contains("Select")) return true;
-        if (name.Contains("Move") || name.Contains("Strafe") || name.Contains("Turn") || name.Contains("Look") || name.Contains("Fire") || name.Contains("Aim") || name.Contains("Mouse"))
+        // Block ALL gameplay inputs from mouse/keyboard - Move, Strafe, Turn, Look, Fire, Aim, Mouse, plus raw WASD names
+        if (name.Contains("Move") || name.Contains("Strafe") || name.Contains("Turn") || name.Contains("Look") || name.Contains("Fire") || name.Contains("Aim") || name.Contains("Mouse") || name.Contains("Forward") || name.Contains("Backward") || name.Contains("Left") || name.Contains("Right") || name.Contains("Jump") || name.Contains("Crouch") || name.Contains("Sprint") || name.Contains("Reload") || name.Contains("Use"))
         { __result = false; return false; }
+        // If VR says this input is false (stick centered, trigger released), also block - don't fall through to original keyboard
+        if (VRInput.overridesBool.ContainsKey(name)) { __result = false; return false; }
+        return true;
         if (VRInput.overridesBool.ContainsKey(name) && (name.Contains("Move") || name.Contains("Strafe")))
         { bool val = VRInput.overridesBool[name]; if (!val) { __result = false; return false; } }
         return true;
@@ -154,11 +204,13 @@ class InputManager_IsInputDown_Patch
     {
         if (!VRManagerState.inVR) return true;
         if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
         string name = ""; if (keyBind != null) name = keyBind.ToString();
         bool v; if (VRInput.overridesBool.TryGetValue(name, out v) && v) { __result = true; return false; }
         if (name.Contains("Menu") || name.Contains("Confirm") || name.Contains("Cancel") || name.Contains("Pause") || name.Contains("Back") || name.Contains("Select")) return true;
-        if (name.Contains("Move") || name.Contains("Strafe") || name.Contains("Turn") || name.Contains("Look") || name.Contains("Fire") || name.Contains("Aim") || name.Contains("Mouse"))
+        if (name.Contains("Move") || name.Contains("Strafe") || name.Contains("Turn") || name.Contains("Look") || name.Contains("Fire") || name.Contains("Aim") || name.Contains("Mouse") || name.Contains("Forward") || name.Contains("Backward") || name.Contains("Left") || name.Contains("Right") || name.Contains("Jump") || name.Contains("Crouch") || name.Contains("Sprint") || name.Contains("Reload") || name.Contains("Use"))
         { __result = false; return false; }
+        if (VRInput.overridesBool.ContainsKey(name)) { __result = false; return false; }
         return true;
     }
 }
@@ -258,8 +310,10 @@ class WeaponLight_VR_Head
 [HarmonyPatch(typeof(HUDCamera), "Update")]
 class HUDCamera_VR_Shrink_Patch
 {
-    // FIX flicker: hudFixed was static and never reset - new HUDCamera per level never got the fix.
-    // Also HUDCamera.Update recreates RenderTextures whenever hudScale changes - set it every time but only if changed.
+    // FIXED from tree dump: HUDCamera is NOT the neon visor. Neon visor = layer 14 mesh rendered by HelmetCamera (culling 16384, child of WorldCamera).
+    // HUDCamera (culling 1568 = UI,Debris,Precipitation, target CleanToBlendTarget) blends NGUI UI via doubleGlassMaterial onto the visor.
+    // Setting glassIntensity=0, glassTexture=null, and clear=transparent (old code) killed that blend -> HUD completely missing (dump: glassIntensity=0, lastImage active but empty).
+    // So: ONLY set hudScale and distort (safe for VR). Never touch glass, cullingMask, or clearFlags.
     static System.Collections.Generic.HashSet<int> fixedInstances = new System.Collections.Generic.HashSet<int>();
     static void Postfix(HUDCamera __instance)
     {
@@ -270,65 +324,31 @@ class HUDCamera_VR_Shrink_Patch
             __instance.hudScale = 1.0f;
             __instance.distortIntensityX = 0f;
             __instance.distortIntensityY = 0f;
-            __instance.glassIntensity = 0f;
-            __instance.glassOffset = 0f;
             try { Traverse.Create(__instance).Field("lastHudScale").SetValue(1.0f); } catch { }
-            try { Traverse.Create(__instance).Field("glassTexture").SetValue(null); } catch { }
-            // Stop HUDCamera rendering the world again - it should only render HUD layers, not world.
-            // Rendering world into lastImage = double world, 1 frame behind playerCamera = flicker + inset.
-            try {
-                Camera myCam = null;
-                var f = AccessTools.Field(__instance.GetType(), "myCamera");
-                if (f != null) myCam = f.GetValue(__instance) as Camera;
-                if (myCam != null) {
-                    // HUD layers in IM: 9 and 10 are weapon/hands/HUD, keep them, drop Default world (0) and everything else
-                    // If your HUD uses different layers, keep them - this is the flicker source
-                    myCam.cullingMask = (1 << 9) | (1 << 10) | (1 << 5); // 5 = UI, 9/10 = HUD/weapon
-                    myCam.clearFlags = CameraClearFlags.SolidColor;
-                    myCam.backgroundColor = new Color(0f, 0f, 0f, 0f);
-                }
-            } catch { }
+            // DO NOT set glassIntensity / glassOffset / glassTexture - doubleGlass needs them to show HUD
+            // DO NOT set myCamera.cullingMask or clearFlags - original 1568 and Color clear are correct for the blend pipeline
             fixedInstances.Add(id);
         }
-        // Do NOT copy transform here - HUDCamera.Update runs before VRHeadTracker.LateUpdate, 1 frame lag = flicker
     }
 }
 
-// VRHUDAnchor FIX: copy in LateUpdate was 1 frame behind VRHeadTracker AND fought HUDCamera.Update which resets transform to flat camera every frame = flicker / not attached.
-// Fix: PARENT HUDCamera to the VR head camera once, so it inherits VR movement automatically, no copy lag, no fight.
+// VRHUDAnchor - FIXED7: Only for HUDCamera (visor distortion). NGUI camera is NOT anchored - moving it caused flicker (it fights Fake 3D UI Root parent).
+// The glued HUD is the GLASS MESH re-parented to WorldCamera in Helmet patch, not a camera move.
 public class VRHUDAnchor : MonoBehaviour
 {
     Camera hudCam;
-    bool parented = false;
     void Awake() { hudCam = GetComponent<Camera>(); if (hudCam == null) hudCam = GetComponentInChildren<Camera>(); }
-    void LateUpdate()
+    void OnPreRender()
     {
         if (!VRManagerState.inVR) return;
         if (Marine.LocalMarine == null) return;
-        if (parented) return;
+        if (hudCam == null) return;
         Camera headCam = null;
         Camera[] all = Camera.allCameras;
         if (all != null) for (int i=0;i<all.Length;i++) if (all[i]!=null && all[i].GetComponent<VRHeadTracker>()!=null) { headCam = all[i]; break; }
-        if (headCam != null && hudCam != null)
-        {
-            // Parent the HUDCamera GameObject to the head camera - HUD becomes a child of VR camera
-            // HUDCamera's own Update may try to set world position - parenting + local 0 keeps it locked to head
-            // Use SetParent with worldPositionStays=false, then zero local
-            hudCam.transform.SetParent(headCam.transform, false);
-            hudCam.transform.localPosition = Vector3.zero;
-            hudCam.transform.localRotation = Quaternion.identity;
-            parented = true;
-            try { VRManagerLogger.LogInfo("[IMVR] VRHUDAnchor parented HUDCamera to headCam"); } catch { }
-        }
-    }
-    // If HUDCamera.Update resets parent, re-parent in OnPreRender as well
-    void OnPreRender() {
-        if (!parented || hudCam == null) return;
-        if (hudCam.transform.parent == null) parented = false;
-        else if (hudCam.transform.localPosition != Vector3.zero || hudCam.transform.localRotation != Quaternion.identity) {
-            hudCam.transform.localPosition = Vector3.zero;
-            hudCam.transform.localRotation = Quaternion.identity;
-        }
+        if (headCam == null) return;
+        hudCam.transform.position = headCam.transform.position;
+        hudCam.transform.rotation = headCam.transform.rotation;
     }
 }
 
@@ -375,6 +395,92 @@ class InputManager_IsInput_Debug
     static void Prefix(object keyBind)
     {
         if (VRManagerState.verboseDebug) VRManagerLogger.LogInfo("[IMVR DEBUG] IsInput called: " + keyBind.ToString() + " overridesHas=" + VRInput.overridesBool.ContainsKey(keyBind.ToString()));
+    }
+}
+
+// === RAW UNITY INPUT BLOCK - game reads Input.GetAxis / GetKey directly, bypassing InputManager.IsInput ===
+// If we only block InputManager, mouse look (Mouse X/Y) and WASD via Unity Input still work. Block those too in VR gameplay.
+[HarmonyPatch(typeof(UnityEngine.Input), "GetAxis")]
+class UnityInput_GetAxis_Block
+{
+    static bool Prefix(string axisName, ref float __result)
+    {
+        if (!VRManagerState.inVR) return true;
+        if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
+        if (axisName == null) return true;
+        if (axisName == "Mouse X" || axisName == "Mouse Y" || axisName == "Horizontal" || axisName == "Vertical" || axisName.Contains("Mouse") || axisName.Contains("Look"))
+        { __result = 0f; return false; }
+        return true;
+    }
+}
+[HarmonyPatch(typeof(UnityEngine.Input), "GetAxisRaw")]
+class UnityInput_GetAxisRaw_Block
+{
+    static bool Prefix(string axisName, ref float __result)
+    {
+        if (!VRManagerState.inVR) return true;
+        if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
+        if (axisName == null) return true;
+        if (axisName == "Mouse X" || axisName == "Mouse Y" || axisName == "Horizontal" || axisName == "Vertical" || axisName.Contains("Mouse") || axisName.Contains("Look"))
+        { __result = 0f; return false; }
+        return true;
+    }
+}
+[HarmonyPatch(typeof(UnityEngine.Input), "GetKey", new System.Type[]{typeof(UnityEngine.KeyCode)})]
+class UnityInput_GetKey_Block
+{
+    static bool Prefix(UnityEngine.KeyCode key, ref bool __result)
+    {
+        if (!VRManagerState.inVR) return true;
+        if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
+        // Block WASD, arrows, space, shift, mouse buttons in VR gameplay - VR overrides handle these via InputManager
+        if (key == UnityEngine.KeyCode.W || key == UnityEngine.KeyCode.A || key == UnityEngine.KeyCode.S || key == UnityEngine.KeyCode.D ||
+            key == UnityEngine.KeyCode.UpArrow || key == UnityEngine.KeyCode.DownArrow || key == UnityEngine.KeyCode.LeftArrow || key == UnityEngine.KeyCode.RightArrow ||
+            key == UnityEngine.KeyCode.Space || key == UnityEngine.KeyCode.LeftShift || key == UnityEngine.KeyCode.RightShift ||
+            key == UnityEngine.KeyCode.Mouse0 || key == UnityEngine.KeyCode.Mouse1 || key == UnityEngine.KeyCode.Mouse2)
+        { __result = false; return false; }
+        return true;
+    }
+}
+[HarmonyPatch(typeof(UnityEngine.Input), "GetKeyDown", new System.Type[]{typeof(UnityEngine.KeyCode)})]
+class UnityInput_GetKeyDown_Block
+{
+    static bool Prefix(UnityEngine.KeyCode key, ref bool __result)
+    {
+        if (!VRManagerState.inVR) return true;
+        if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
+        if (key == UnityEngine.KeyCode.W || key == UnityEngine.KeyCode.A || key == UnityEngine.KeyCode.S || key == UnityEngine.KeyCode.D ||
+            key == UnityEngine.KeyCode.UpArrow || key == UnityEngine.KeyCode.DownArrow || key == UnityEngine.KeyCode.LeftArrow || key == UnityEngine.KeyCode.RightArrow ||
+            key == UnityEngine.KeyCode.Space || key == UnityEngine.KeyCode.LeftShift || key == UnityEngine.KeyCode.RightShift ||
+            key == UnityEngine.KeyCode.Mouse0 || key == UnityEngine.KeyCode.Mouse1 || key == UnityEngine.KeyCode.Mouse2)
+        { __result = false; return false; }
+        return true;
+    }
+}
+[HarmonyPatch(typeof(UnityEngine.Input), "GetMouseButton")]
+class UnityInput_GetMouseButton_Block
+{
+    static bool Prefix(int button, ref bool __result)
+    {
+        if (!VRManagerState.inVR) return true;
+        if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
+        __result = false; return false;
+    }
+}
+[HarmonyPatch(typeof(UnityEngine.Input), "GetMouseButtonDown")]
+class UnityInput_GetMouseButtonDown_Block
+{
+    static bool Prefix(int button, ref bool __result)
+    {
+        if (!VRManagerState.inVR) return true;
+        if (Marine.LocalMarine == null) return true;
+        try { if (GameManager.IsPaused) return true; } catch { }
+        __result = false; return false;
     }
 }
 public class VRInputRunner : MonoBehaviour
