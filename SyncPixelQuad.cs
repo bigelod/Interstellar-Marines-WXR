@@ -116,7 +116,10 @@ public class SyncPixelQuad : MonoBehaviour
             if (frameId != lastFrameId)
             {
                 lastFrameId = frameId;
-                try { VRManagerLogger.LogInfo("[IMVR] SyncPixel frameId=" + frameId + " red=" + red); } catch { }
+                if (VRManagerState.verboseDebug)
+                {
+                    try { VRManagerLogger.LogInfo("[IMVR] SyncPixel frameId=" + frameId + " red=" + red); } catch { }
+                }
             }
         }
         else
