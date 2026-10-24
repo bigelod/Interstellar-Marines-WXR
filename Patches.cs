@@ -341,7 +341,41 @@ public class VRGlassAnchor : MonoBehaviour
     Vector3 originalLocalPos;
     Quaternion originalLocalRot;
     Vector3 originalLocalScale;
-    float vrHudScale = 0.6f; // FIXED14: This is now HUDCamera frustum divider - FOV or orthoSize / 0.6 = UI 0.6x size in texture. Try 0.5 smaller, 0.75 larger.
+    float vrHudScale = 0.8f; // Default - overridden by config.txt if present (see LoadHudScaleFromConfig)
+    static float cachedHudScale = -1f;
+    static float lastConfigCheckTime = 0f;
+    static float LoadHudScaleFromConfig(float fallback)
+    {
+        // Re-check file at most every 2s so you can tweak config.txt live without restart
+        if (UnityEngine.Time.realtimeSinceStartup - lastConfigCheckTime < 2f && cachedHudScale > 0f) return cachedHudScale;
+        lastConfigCheckTime = UnityEngine.Time.realtimeSinceStartup;
+        try {
+            string dllDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            string[] candidates = new string[] {
+                System.IO.Path.Combine(dllDir, "config.txt"),
+                System.IO.Path.Combine(System.IO.Path.Combine(dllDir, ".."), "config.txt"),
+                System.IO.Path.Combine(System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."), "config.txt"),
+                System.IO.Path.Combine(UnityEngine.Application.dataPath, "config.txt")
+            };
+            foreach (string p in candidates) {
+                string path = System.IO.Path.GetFullPath(p);
+                if (!System.IO.File.Exists(path)) continue;
+                string[] lines = System.IO.File.ReadAllLines(path);
+                foreach (string line in lines) {
+                    string t = line.Trim();
+                    if (t.StartsWith("#") || t.Length == 0) continue;
+                    // Accept: hudScale=0.8, HUDScale=0.8, hud_scale=0.8, VRHudScale=0.8
+                    string low = t.ToLower();
+                    if (low.StartsWith("hudscale") || low.StartsWith("hud_scale") || low.StartsWith("vrhudscale")) {
+                        string[] kv = t.Split(new char[]{'='}, 2);
+                        if (kv.Length == 2) { float v; if (float.TryParse(kv[1].Trim(), out v) && v > 0.1f && v <= 1.5f) { cachedHudScale = v; return v; } }
+                    }
+                }
+            }
+        } catch {}
+        if (cachedHudScale > 0f) return cachedHudScale;
+        return fallback;
+    }
     static float origHudOrtho = 0f;
     static float origHudFov = 0f;
     static Rect origHudRect = new Rect(0f,0f,0f,0f);
@@ -417,6 +451,7 @@ public class VRGlassAnchor : MonoBehaviour
     }
     void LateUpdate()
     {
+        vrHudScale = LoadHudScaleFromConfig(vrHudScale);
         // Menus / paused / not in VR = full normal scale. CanvasScaler is universal, so we MUST restore here, not just when helmet is up.
         bool inGameplay = VRManagerState.inVR && Marine.LocalMarine != null;
         try { if (GameManager.IsPaused) inGameplay = false; } catch {}
@@ -469,7 +504,7 @@ public class VRGlassAnchor : MonoBehaviour
                             Transform hudRoot = HUDCamera.Instance.transform.parent;
                             if (hudRoot != null) {
                                 if (origHudRootScale.x == 0f) origHudRootScale = hudRoot.localScale;
-                                hudRoot.localScale = origHudRootScale * vrHudScale;
+                                hudRoot.localScale = origHudRootScale * vrHudScale; // 0.8 = 80% original size, 0.6 was previous, 1.0 = full
                             }
                         }
                     } catch {}

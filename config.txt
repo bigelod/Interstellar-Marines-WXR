@@ -3,3 +3,4 @@ turn_speed=80
 deadzone=0.20
 flipHands=false
 # set true for Pico 4 Ultra if hands are upside down vs Quest 3
+hudScale=0.8
