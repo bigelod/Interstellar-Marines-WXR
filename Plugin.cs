@@ -10,6 +10,9 @@ public static class VRManagerState
     public static bool isSetup = false;
     public static int rxTxFailCount = 0;
     public static int rxTxFailMaxRetry = 5;
+    public static bool verboseDebug = false;
+
+    public static GameObject VRRoot;
 }
 
 public static class VRManagerLogger

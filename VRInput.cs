@@ -201,7 +201,7 @@ public static class VRInput
     }
 }
 
-public class VRInputRunner : MonoBehaviour
-{
-    void Update() { VRInput.UpdateFrame(); }
-}
+//public class VRInputRunner : MonoBehaviour
+//{
+//    void Update() { VRInput.UpdateFrame(); }
+//}

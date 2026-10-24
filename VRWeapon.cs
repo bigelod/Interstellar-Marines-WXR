@@ -20,25 +20,25 @@ public class VRWeapon : MonoBehaviour
         Quaternion r;
         if (!XRAPI.XR_GetControllerPose(hand, out p, out r)) return;
 
-        // 1. Same invert as HMD
+        // XRAPI stores raw OpenXR RH - convert both pos and rot
+        // Pos: flip Z. Rot: invert pitch/yaw. Same as head, same frame.
+        p = new Vector3(p.x, p.y, -p.z);
         Vector3 e = r.eulerAngles;
         r = Quaternion.Euler(-e.x, -e.y, e.z);
 
-        // 2. RH->LH position
-        p = new Vector3(p.x, p.y, -p.z);
+        // Yaw fix - Quest 3 vs Pico is YAW, not roll (0,0,180)
+        // flipHands from config is the switch
+        if (VRManager.flipHands) r = r * Quaternion.Euler(0f, 180f, 0f);
 
-        // 3. Fix 180° backwards
-        //r = r * Quaternion.Euler(0f, 180f, 0f);
-
-        // Known bug: Quest 3 vs Pico 4 Ultra hands are 180deg rolled
-        if (!VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
-        // 5. HMD-local -> world (app sends local to HMD)
-        Transform refT = VRHeadTracker.VRRoot;
-        Transform origin = refT != null ? refT.parent : null;
-        if (origin != null)
+        // Controller pose is ABSOLUTE tracking space, same as head - NOT HMD-local
+        // (XRAPI.ParseString: lPos/rPos/hPos all in same space)
+        // So NO headWorld + headRot * p - that double-counts head.
+        // Direct: VRRoot is the tracking origin at Marine feet
+        if (VRManagerState.VRRoot != null)
         {
-            p = origin.TransformPoint(p);
-            r = origin.rotation * r;
+            Transform refT = VRManagerState.VRRoot.transform;
+            p = refT.TransformPoint(p);
+            r = refT.rotation * r;
         }
 
         Transform model = null;
