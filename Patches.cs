@@ -76,18 +76,8 @@ class Helmet_InitFirstPersonCamera_Patch
             cam.gameObject.AddComponent<SyncPixelQuad>();
         }
 
-        // In Helmet_InitFirstPersonCamera_Patch, after playerCamera
-        Camera[] allCams = Camera.allCameras;
-        if (allCams != null)
-        {
-            for (int i = 0; i < allCams.Length; i++)
-            {
-                if (allCams[i] != null && allCams[i].GetComponent<SyncPixelQuad>() == null)
-                {
-                    allCams[i].gameObject.AddComponent<SyncPixelQuad>();
-                }
-            }
-        }
+        // SyncPixelQuad finds top camera itself - do NOT add to all cameras here
+        // That created 2-3 instances all re-parenting to same top cam
     }
 }
 
@@ -212,7 +202,8 @@ class Helmet_VR_NearClip
 
         if (___playerCamera != null)
         {
-            ___playerCamera.transform.localPosition += new Vector3(0f, 0.08f, 0.05f);
+            // Only apply once - InitFirstPersonCamera can run multiple times per level, += would drift HUD
+            if (Mathf.Abs(___playerCamera.transform.localPosition.y - 0.08f) > 0.01f) ___playerCamera.transform.localPosition += new Vector3(0f, 0.08f, 0.05f);
             ___playerCamera.nearClipPlane = 0.18f;
             ___playerCamera.farClipPlane = 80f;
             ___playerCamera.fieldOfView = 98f;

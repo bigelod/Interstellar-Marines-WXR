@@ -8,8 +8,11 @@ public class SyncPixelQuad : MonoBehaviour
     Camera cam;
     int lastFrameId = -1;
 
+    static bool alreadyCreated = false;
     void Awake()
     {
+        if (alreadyCreated) { GameObject.Destroy(this); return; }
+        alreadyCreated = true;
         cam = GetComponent<Camera>();
         if (cam == null) cam = GetComponentInParent<Camera>();
         if (cam == null) cam = Camera.main;
