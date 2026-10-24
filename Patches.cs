@@ -100,7 +100,7 @@ class Helmet_InitFirstPersonCamera_Patch
         // FIXED7: Glued HUD mesh, not camera anchor. NGUI camera stays at UI root (flicker was from moving it).
         // Parent the glass HUD mesh to VR camera, like it was parented to helmet in flat mode.
         try {
-            if (HUDCamera.Instance != null && HUDCamera.Instance.GetComponent<VRHUDAnchor>() == null) HUDCamera.Instance.gameObject.AddComponent<VRHUDAnchor>();
+            // FIXED10: Do NOT add VRHUDAnchor to HUDCamera - it fights HUDCamera.Update (HUD UI Root parent) and flickers the texture. Glass mesh is the HUD.
         } catch { }
         // FIXED8: Filter was layer==14, but dump shows CH_Marine1pHelmetGlass_HUD is layer 0 (its children meshes are 14). So it was skipped.
         // Fix: match name only, any layer. And attach a per-frame anchor - Glass_HUD has an Animator that can reset parent/transform, so one-time SetParent in Init is not enough.
@@ -113,11 +113,12 @@ class Helmet_InitFirstPersonCamera_Patch
                     if (t == null) continue;
                     if (t.name.Contains("Glass_HUD")) {
                         if (t.GetComponent<VRGlassAnchor>() == null) t.gameObject.AddComponent<VRGlassAnchor>();
-                        // Initial parent now - anchor will keep it every frame
+                        // Initial parent now - preserve original local pose, don't zero it (Animator pose)
                         if (t.parent != cam.transform) {
+                            Vector3 oPos = t.localPosition; Quaternion oRot = t.localRotation;
                             t.SetParent(cam.transform, false);
-                            t.localPosition = Vector3.zero;
-                            t.localRotation = Quaternion.identity;
+                            t.localPosition = oPos;
+                            t.localRotation = oRot;
                         }
                     }
                 }
@@ -376,10 +377,14 @@ public class VRGlassAnchor : MonoBehaviour
         if (headCam == null) return;
         Transform t = transform;
         if (IsHelmetOn()) {
-            // Worn: glued to VR head like flat mode helmet attachment
-            if (t.parent != headCam.transform) t.SetParent(headCam.transform, false);
-            t.localPosition = Vector3.zero;
-            t.localRotation = Quaternion.identity;
+            // Worn: glued to VR head like flat mode helmet attachment - preserve Animator pose, don't force identity
+            // Dump: original localRot (1,359.7,0) is helmetClose pose. Forcing (0,0,0) every LateUpdate fights Animator in Update = flicker.
+            // Only re-parent when needed, let Animator drive local pos/rot after that.
+            if (t.parent != headCam.transform) {
+                t.SetParent(headCam.transform, false);
+                t.localPosition = originalLocalPos;
+                t.localRotation = originalLocalRot;
+            }
         } else {
             // Helmet up / visor open: restore to original Helmet parent - HUD disappears like flat mode (it's attached to the lifted helmet, not your face)
             if (originalParent != null && t.parent != originalParent) {
