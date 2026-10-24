@@ -3,10 +3,21 @@ using System.Reflection;
 using System.Text;
 using UnityEngine;
 using HarmonyLib;
+using System.IO;
 
 // C# 3 compatible - no interpolated strings, no null-conditional, no pattern matching
 public static class HUDTreeDumper
 {
+    public static string lastDumpPath = null;
+    public static string GetDumpPath()
+    {
+        try {
+            string dllDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            if (!string.IsNullOrEmpty(dllDir)) return Path.Combine(dllDir, "hud_tree.txt");
+        } catch {}
+        try { return Path.Combine(Directory.GetCurrentDirectory(), "hud_tree.txt"); } catch {}
+        return "hud_tree.txt";
+    }
     public static void DumpAll(object helmetInstance)
     {
         try
@@ -99,9 +110,9 @@ public static class HUDTreeDumper
                 for (int i=0;i<allGO.Length;i++) {
                     GameObject go = allGO[i];
                     string n = go.name.ToLower();
-                    if (n.Contains("hud") || n.Contains("lastimage") || n.Contains("canvas") || n.Contains("helmet") || n.Contains("visor") || n.Contains("neon")) {
+                    if (n.Contains("hud") || n.Contains("lastimage") || n.Contains("canvas") || n.Contains("helmet") || n.Contains("visor") || n.Contains("neon") || n.Contains("glass")) {
                         string pn = go.transform.parent != null ? go.transform.parent.name : "null";
-                        sb.AppendLine("[IMVR-TREE] FOUND " + go.name + " layer=" + go.layer + " active=" + go.activeInHierarchy + " parent=" + pn + " pos=" + go.transform.position);
+                        sb.AppendLine("[IMVR-TREE] FOUND " + go.name + " layer=" + go.layer + " active=" + go.activeInHierarchy + " parent=" + pn + " pos=" + go.transform.position + " localPos=" + go.transform.localPosition + " localRot=" + go.transform.localEulerAngles);
                         Component[] comps = go.GetComponents<Component>();
                         for (int k=0;k<comps.Length;k++) sb.AppendLine("[IMVR-TREE]   comp " + comps[k].GetType().Name);
                     }
@@ -110,12 +121,14 @@ public static class HUDTreeDumper
 
             sb.AppendLine("[IMVR-TREE] ===== DUMP END =====");
             string outStr = sb.ToString();
+            // PC test: dump to same directory as mod DLL, always
+            try { lastDumpPath = GetDumpPath(); File.WriteAllText(lastDumpPath, outStr); VRManagerLogger.LogInfo("[IMVR-TREE] dump written to " + lastDumpPath); } catch (Exception fe) { VRManagerLogger.LogError("[IMVR-TREE] file write failed " + fe.Message); }
             int chunk = 4000;
             for (int i=0;i<outStr.Length;i+=chunk) {
                 string part = outStr.Substring(i, Math.Min(chunk, outStr.Length-i));
-                try { VRManagerLogger.LogInfo(part); } catch { Debug.Log(part); }
+                try { VRManagerLogger.LogInfo(part); } catch { VRManagerLogger.LogInfo(part); }
             }
-        } catch (Exception e) { try { VRManagerLogger.LogError("[IMVR-TREE] dump failed " + e.ToString()); } catch { Debug.LogError(e); } }
+        } catch (Exception e) { try { VRManagerLogger.LogError("[IMVR-TREE] dump failed " + e.ToString()); } catch { VRManagerLogger.LogError(e.Message); } }
     }
 
     static void DumpTransform(Transform t, StringBuilder sb, int depth)
@@ -146,6 +159,21 @@ public static class HUDTreeDumper
     }
 }
 
+
+// F9 runner - always dumps, bypasses verboseDebug. DontDestroyOnLoad so it survives level loads.
+public class HUDTreeDumpRunner : MonoBehaviour
+{
+    public static object lastHelmet;
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.F9))
+        {
+            HUDTreeDumper.DumpAll(lastHelmet);
+            VRManagerLogger.LogInfo("[IMVR-TREE] F9 dump written to " + HUDTreeDumper.lastDumpPath);
+        }
+    }
+}
+
 [HarmonyPatch]
 class Helmet_TreeDump_Patch
 {
@@ -157,6 +185,17 @@ class Helmet_TreeDump_Patch
     }
     static void Postfix(object __instance)
     {
+        // F9 setup - always, not gated
+        HUDTreeDumpRunner.lastHelmet = __instance;
+        try {
+            GameObject runnerGO = GameObject.Find("HUDTreeDumpRunner");
+            if (runnerGO == null) {
+                runnerGO = new GameObject("HUDTreeDumpRunner");
+                runnerGO.AddComponent<HUDTreeDumpRunner>();
+                GameObject.DontDestroyOnLoad(runnerGO);
+            }
+        } catch {}
+        // Non-F9 auto dump - keep verboseDebug gate
         if (VRManagerState.verboseDebug)
         {
             try
