@@ -102,6 +102,8 @@ class Helmet_InitFirstPersonCamera_Patch
         try {
             if (HUDCamera.Instance != null && HUDCamera.Instance.GetComponent<VRHUDAnchor>() == null) HUDCamera.Instance.gameObject.AddComponent<VRHUDAnchor>();
         } catch { }
+        // FIXED8: Filter was layer==14, but dump shows CH_Marine1pHelmetGlass_HUD is layer 0 (its children meshes are 14). So it was skipped.
+        // Fix: match name only, any layer. And attach a per-frame anchor - Glass_HUD has an Animator that can reset parent/transform, so one-time SetParent in Init is not enough.
         try {
             MonoBehaviour helmMB = __instance as MonoBehaviour;
             if (helmMB != null && cam != null) {
@@ -109,15 +111,13 @@ class Helmet_InitFirstPersonCamera_Patch
                 for (int i=0;i<allT.Length;i++) {
                     Transform t = allT[i];
                     if (t == null) continue;
-                    // CH_Marine1pHelmetGlass_HUD is the neon HUD surface - layer 14, mat CH_1pHelmet_HUD_NGUI
-                    if (t.gameObject.layer == 14 && t.name.Contains("Glass_HUD")) {
-                        // Keep damage logic: Helmet component still controls material/texture, only parent changes
-                        // SetParent to WorldCamera (VR head) with local 0 - glued like flat mode helmet attachment
+                    if (t.name.Contains("Glass_HUD")) {
+                        if (t.GetComponent<VRGlassAnchor>() == null) t.gameObject.AddComponent<VRGlassAnchor>();
+                        // Initial parent now - anchor will keep it every frame
                         if (t.parent != cam.transform) {
                             t.SetParent(cam.transform, false);
                             t.localPosition = Vector3.zero;
                             t.localRotation = Quaternion.identity;
-                            // Keep original scale from dump (1,1,0.8) - SetParent(false) preserves local scale, don't force to 1
                         }
                     }
                 }
@@ -328,6 +328,65 @@ class HUDCamera_VR_Shrink_Patch
             // DO NOT set glassIntensity / glassOffset / glassTexture - doubleGlass needs them to show HUD
             // DO NOT set myCamera.cullingMask or clearFlags - original 1568 and Color clear are correct for the blend pipeline
             fixedInstances.Add(id);
+        }
+    }
+}
+
+// VRGlassAnchor - FIXED9: Only glue when helmet is ON/worn (visor Closed). When visor is Open / helmet up, HUD must NOT show - restore to original Helmet parent like flat mode.
+// Dump: Helmet.currentVisorState = Closed when worn. Field is on Helmet component (Helmet(Clone) -> Root -> Helmet). We find it by walking up parents.
+public class VRGlassAnchor : MonoBehaviour
+{
+    Transform originalParent;
+    Vector3 originalLocalPos;
+    Quaternion originalLocalRot;
+    Component helmetComp;
+    System.Reflection.FieldInfo visorStateField;
+    void Awake()
+    {
+        originalParent = transform.parent;
+        originalLocalPos = transform.localPosition;
+        originalLocalRot = transform.localRotation;
+        // Walk up to find Helmet component
+        Transform p = transform.parent;
+        while (p != null) {
+            Component h = p.gameObject.GetComponent("Helmet");
+            if (h != null) { helmetComp = h; visorStateField = h.GetType().GetField("currentVisorState", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance); break; }
+            p = p.parent;
+        }
+    }
+    bool IsHelmetOn()
+    {
+        // If we can't read state, default to on (glued) - flat mode default is Closed
+        if (helmetComp == null || visorStateField == null) return true;
+        try {
+            object v = visorStateField.GetValue(helmetComp);
+            if (v == null) return true;
+            string s = v.ToString();
+            // Closed = worn / on, Open = up / off - only glue when Closed
+            return s == "Closed";
+        } catch { return true; }
+    }
+    void LateUpdate()
+    {
+        if (!VRManagerState.inVR) return;
+        if (Marine.LocalMarine == null) return;
+        Camera headCam = null;
+        Camera[] all = Camera.allCameras;
+        if (all != null) for (int i=0;i<all.Length;i++) if (all[i]!=null && all[i].GetComponent<VRHeadTracker>()!=null) { headCam = all[i]; break; }
+        if (headCam == null) return;
+        Transform t = transform;
+        if (IsHelmetOn()) {
+            // Worn: glued to VR head like flat mode helmet attachment
+            if (t.parent != headCam.transform) t.SetParent(headCam.transform, false);
+            t.localPosition = Vector3.zero;
+            t.localRotation = Quaternion.identity;
+        } else {
+            // Helmet up / visor open: restore to original Helmet parent - HUD disappears like flat mode (it's attached to the lifted helmet, not your face)
+            if (originalParent != null && t.parent != originalParent) {
+                t.SetParent(originalParent, false);
+                t.localPosition = originalLocalPos;
+                t.localRotation = originalLocalRot;
+            }
         }
     }
 }
