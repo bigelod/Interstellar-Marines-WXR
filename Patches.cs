@@ -340,6 +340,15 @@ public class VRGlassAnchor : MonoBehaviour
     Transform originalParent;
     Vector3 originalLocalPos;
     Quaternion originalLocalRot;
+    Vector3 originalLocalScale;
+    float vrHudScale = 0.6f; // FIXED14: This is now HUDCamera frustum divider - FOV or orthoSize / 0.6 = UI 0.6x size in texture. Try 0.5 smaller, 0.75 larger.
+    static float origHudOrtho = 0f;
+    static float origHudFov = 0f;
+    static Rect origHudRect = new Rect(0f,0f,0f,0f);
+    static Vector3 origHudRootScale = new Vector3(0f,0f,0f);
+    static float origNguiOrtho = 0f;
+    static float origNguiFov = 0f;
+    static float origScaleFactor = 0f;
     Component helmetComp;
     System.Reflection.FieldInfo visorStateField;
     void Awake()
@@ -347,6 +356,7 @@ public class VRGlassAnchor : MonoBehaviour
         originalParent = transform.parent;
         originalLocalPos = transform.localPosition;
         originalLocalRot = transform.localRotation;
+        originalLocalScale = transform.localScale;
         // Walk up to find Helmet component
         Transform p = transform.parent;
         while (p != null) {
@@ -367,9 +377,50 @@ public class VRGlassAnchor : MonoBehaviour
             return s == "Closed";
         } catch { return true; }
     }
+    void RestoreUniversalScale()
+    {
+        try {
+            // Restore HUDCamera viewport rect to full (0,0,1,1) and HUD UI Root scale to 1 - menus need full screen, no cyan
+            if (HUDCamera.Instance != null) {
+                Camera hc = HUDCamera.Instance.GetComponent<Camera>();
+                if (hc != null && origHudRect.width != 0f) hc.rect = origHudRect;
+                Transform hr = HUDCamera.Instance.transform.parent;
+                if (hr != null && origHudRootScale.x != 0f) hr.localScale = origHudRootScale;
+            }
+            Camera[] allC = Camera.allCameras;
+            if (allC != null) for (int ci=0; ci<allC.Length; ci++) {
+                Camera c = allC[ci];
+                if (c == null || c.cullingMask != 65536 || c.name.Contains("HUDCamera")) continue;
+                if (c.orthographic && origNguiOrtho != 0f) c.orthographicSize = origNguiOrtho;
+                else if (!c.orthographic && origNguiFov != 0f) c.fieldOfView = origNguiFov;
+            }
+            if (HUDCamera.Instance != null && origScaleFactor != 0f) {
+                var hcT = HUDCamera.Instance.GetType();
+                var csF = hcT.GetField("mainCanvasScaler", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+                if (csF != null) {
+                    Component scaler = csF.GetValue(HUDCamera.Instance) as Component;
+                    if (scaler != null) {
+                        var sf = scaler.GetType().GetField("scaleFactor", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+                        if (sf != null) sf.SetValue(scaler, origScaleFactor);
+                    }
+                }
+            }
+            // Also restore HUDCamera frustum / doubleGlass UV / mesh scale to originals
+            if (HUDCamera.Instance != null) {
+                Camera hcCam = HUDCamera.Instance.GetComponent<Camera>();
+                if (hcCam != null) {
+                    if (hcCam.orthographic && origHudOrtho != 0f) hcCam.orthographicSize = origHudOrtho;
+                    else if (!hcCam.orthographic && origHudFov != 0f) hcCam.fieldOfView = origHudFov;
+                }
+            }
+        } catch {}
+    }
     void LateUpdate()
     {
-        if (!VRManagerState.inVR) return;
+        // Menus / paused / not in VR = full normal scale. CanvasScaler is universal, so we MUST restore here, not just when helmet is up.
+        bool inGameplay = VRManagerState.inVR && Marine.LocalMarine != null;
+        try { if (GameManager.IsPaused) inGameplay = false; } catch {}
+        if (!inGameplay) { RestoreUniversalScale(); return; }
         if (Marine.LocalMarine == null) return;
         Camera headCam = null;
         Camera[] all = Camera.allCameras;
@@ -385,12 +436,55 @@ public class VRGlassAnchor : MonoBehaviour
                 t.localPosition = originalLocalPos;
                 t.localRotation = originalLocalRot;
             }
+            // FIXED13: hudScale was resolution (1280*0.6 = blurry, same size). Revert to 1 to restore quality.
+            // HUDCamera IS a camera - it renders NGUI UI to CleanToBlendTarget 1280x720, then bend->doubleGlass onto visor.
+            // To shrink screen real estate, shrink the UV projection in doubleGlassMaterial, not texture size or mesh scale.
+            if (t.localScale != originalLocalScale) t.localScale = originalLocalScale;
+            try {
+                if (HUDCamera.Instance != null) {
+                    var hcType = HUDCamera.Instance.GetType();
+                    var hs = hcType.GetField("hudScale", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+                    if (hs != null) hs.SetValue(HUDCamera.Instance, 1f);
+                    // FIXED14: UV tiling also did nothing - shader ignores mainTextureScale or resets it. Revert UV.
+                    var dg = hcType.GetField("doubleGlassMaterial", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+                    if (dg != null) {
+                        Material mat = dg.GetValue(HUDCamera.Instance) as Material;
+                        if (mat != null) { mat.mainTextureScale = new Vector2(1f, 1f); mat.mainTextureOffset = new Vector2(0f, 0f); }
+                    }
+                    // FIXED15: HUDCamera frustum also did nothing (screenshot same). Dump shows NGUI UI is rendered by CAM Camera (parent Fake 3D UI Root), not HUDCamera.
+                    // HUDCamera just bends the already-rendered texture onto visor. Revert HUDCamera frustum.
+                    try {
+                        Camera hcCam = HUDCamera.Instance.GetComponent<Camera>();
+                        if (hcCam != null) {
+                            if (hcCam.orthographic && origHudOrtho != 0f) hcCam.orthographicSize = origHudOrtho;
+                            else if (!hcCam.orthographic && origHudFov != 0f) hcCam.fieldOfView = origHudFov;
+                        }
+                    } catch {}
+                    // FIXED18: Camera.rect caused cyan border - HUDCamera clear=Color cyan fills rest of CleanToBlendTarget. Revert rect to full.
+                    try {
+                        if (HUDCamera.Instance != null) {
+                            Camera hcCam2 = HUDCamera.Instance.GetComponent<Camera>();
+                            if (hcCam2 != null && origHudRect.width != 0f) hcCam2.rect = origHudRect;
+                            // Scale HUD UI Root - parent of UI Canvas + Waypoint Canvas at (501,2,0). Scaling it shrinks UI toward its center pivot, compass + bottom HUD move together, no cyan.
+                            Transform hudRoot = HUDCamera.Instance.transform.parent;
+                            if (hudRoot != null) {
+                                if (origHudRootScale.x == 0f) origHudRootScale = hudRoot.localScale;
+                                hudRoot.localScale = origHudRootScale * vrHudScale;
+                            }
+                        }
+                    } catch {}
+                }
+            } catch {}
         } else {
+            RestoreUniversalScale();
             // Helmet up / visor open: restore to original Helmet parent - HUD disappears like flat mode (it's attached to the lifted helmet, not your face)
             if (originalParent != null && t.parent != originalParent) {
                 t.SetParent(originalParent, false);
                 t.localPosition = originalLocalPos;
                 t.localRotation = originalLocalRot;
+                t.localScale = originalLocalScale;
+            } else if (originalParent != null && t.parent == originalParent && t.localScale != originalLocalScale) {
+                t.localScale = originalLocalScale;
             }
         }
     }
