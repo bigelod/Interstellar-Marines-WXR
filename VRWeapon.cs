@@ -25,7 +25,12 @@ public class VRWeapon : MonoBehaviour
         Vector3 e = r.eulerAngles;
         r = Quaternion.Euler(-e.x, -e.y, e.z);
 
-        if (!VRManager.flipHands) r = r * Quaternion.Euler(0f, 180f, 0f);
+        // Config only, no handsfix.txt - VRManager.flipHands is the toggle.
+        // Raw pose after -e.x/-e.y is upside-down on Quest 3, so:
+        // flipHands=false (Quest 3 default) = apply roll 180 to make it upright
+        // flipHands=true  (Quest 2 / Pico) = leave it upside-down, that is the Quest 2 state
+        // Roll, not yaw - yaw 180 flips aim backwards, roll flips gun upside-down only.
+        if (!VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
 
         Vector3 headWorld = Vector3.zero;
         Quaternion headWorldRot = Quaternion.identity;

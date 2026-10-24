@@ -82,14 +82,14 @@ public class SyncPixelQuad : MonoBehaviour
             quad.layer = 0;
             cam.cullingMask |= (1 << 0);
         }
-        // 50x50 px at screen, touching absolute corner
+        // 150x150 px at screen (3x of 50px), touching absolute corner
         // Viewport (0,1) is exact top-left corner of screen
         float near = cam.nearClipPlane + 0.05f;
-        // World size for 50px: viewport width at near * (50 / pixelWidth)
+        // World size for 150px: viewport width at near * (150 / pixelWidth)
         float worldWidthAtNear = 2f * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * near * cam.aspect;
         float pixelWidth = cam.pixelWidth > 0 ? cam.pixelWidth : Screen.width;
-        float worldSize = worldWidthAtNear * (50f / pixelWidth);
-        if (worldSize <= 0.001f) worldSize = 0.04f; // fallback ~50px
+        float worldSize = worldWidthAtNear * (150f / pixelWidth);
+        if (worldSize <= 0.001f) worldSize = 0.12f; // fallback ~150px
 
         Vector3 corner = cam.ViewportToWorldPoint(new Vector3(0f, 1f, near));
         quad.transform.position = corner;

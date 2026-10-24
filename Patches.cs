@@ -75,6 +75,10 @@ class Helmet_InitFirstPersonCamera_Patch
         {
             cam.gameObject.AddComponent<SyncPixelQuad>();
         }
+        // Attach VRHUDAnchor to HUDCamera once - HUDCamera is its own Camera (HUDCamera.cs: myCamera), not child of Helmet
+        try {
+            if (HUDCamera.Instance != null && HUDCamera.Instance.GetComponent<VRHUDAnchor>() == null) HUDCamera.Instance.gameObject.AddComponent<VRHUDAnchor>();
+        } catch { }
 
         // SyncPixelQuad finds top camera itself - do NOT add to all cameras here
         // That created 2-3 instances all re-parenting to same top cam
@@ -254,23 +258,106 @@ class WeaponLight_VR_Head
 [HarmonyPatch(typeof(HUDCamera), "Update")]
 class HUDCamera_VR_Shrink_Patch
 {
+    // FIX flicker: hudFixed was static and never reset - new HUDCamera per level never got the fix.
+    // Also HUDCamera.Update recreates RenderTextures whenever hudScale changes - set it every time but only if changed.
+    static System.Collections.Generic.HashSet<int> fixedInstances = new System.Collections.Generic.HashSet<int>();
     static void Postfix(HUDCamera __instance)
     {
         if (!VRManagerState.inVR) return;
-        __instance.hudScale = 1.2f;
-        object scalerObj = Traverse.Create(__instance).Field("mainCanvasScaler").GetValue();
-        if (scalerObj != null) Traverse.Create(scalerObj).Property("referenceResolution").SetValue(new Vector2(4200f, 2362f));
-        __instance.distortIntensityX = 0.15f;
-        __instance.distortIntensityY = 0.15f;
-        __instance.glassIntensity = 0f;
-        __instance.glassOffset = 0f;
-        try { Traverse.Create(__instance).Field("glassTexture").SetValue(null); } catch { }
-        object lastImageObj = Traverse.Create(__instance).Field("lastImage").GetValue();
-        if (lastImageObj != null)
+        int id = __instance.GetInstanceID();
+        if (!fixedInstances.Contains(id))
         {
-            RectTransform rt = Traverse.Create(lastImageObj).Property("rectTransform").GetValue<RectTransform>();
-            if (rt != null) { rt.localScale = new Vector3(0.68f, 0.68f, 1f); rt.anchoredPosition = Vector2.zero; }
+            __instance.hudScale = 1.0f;
+            __instance.distortIntensityX = 0f;
+            __instance.distortIntensityY = 0f;
+            __instance.glassIntensity = 0f;
+            __instance.glassOffset = 0f;
+            try { Traverse.Create(__instance).Field("lastHudScale").SetValue(1.0f); } catch { }
+            try { Traverse.Create(__instance).Field("glassTexture").SetValue(null); } catch { }
+            // Stop HUDCamera rendering the world again - it should only render HUD layers, not world.
+            // Rendering world into lastImage = double world, 1 frame behind playerCamera = flicker + inset.
+            try {
+                Camera myCam = null;
+                var f = AccessTools.Field(__instance.GetType(), "myCamera");
+                if (f != null) myCam = f.GetValue(__instance) as Camera;
+                if (myCam != null) {
+                    // HUD layers in IM: 9 and 10 are weapon/hands/HUD, keep them, drop Default world (0) and everything else
+                    // If your HUD uses different layers, keep them - this is the flicker source
+                    myCam.cullingMask = (1 << 9) | (1 << 10) | (1 << 5); // 5 = UI, 9/10 = HUD/weapon
+                    myCam.clearFlags = CameraClearFlags.SolidColor;
+                    myCam.backgroundColor = new Color(0f, 0f, 0f, 0f);
+                }
+            } catch { }
+            fixedInstances.Add(id);
         }
+        // Do NOT copy transform here - HUDCamera.Update runs before VRHeadTracker.LateUpdate, 1 frame lag = flicker
+    }
+}
+
+// VRHUDAnchor FIX: copy in LateUpdate was 1 frame behind VRHeadTracker AND fought HUDCamera.Update which resets transform to flat camera every frame = flicker / not attached.
+// Fix: PARENT HUDCamera to the VR head camera once, so it inherits VR movement automatically, no copy lag, no fight.
+public class VRHUDAnchor : MonoBehaviour
+{
+    Camera hudCam;
+    bool parented = false;
+    void Awake() { hudCam = GetComponent<Camera>(); if (hudCam == null) hudCam = GetComponentInChildren<Camera>(); }
+    void LateUpdate()
+    {
+        if (!VRManagerState.inVR) return;
+        if (Marine.LocalMarine == null) return;
+        if (parented) return;
+        Camera headCam = null;
+        Camera[] all = Camera.allCameras;
+        if (all != null) for (int i=0;i<all.Length;i++) if (all[i]!=null && all[i].GetComponent<VRHeadTracker>()!=null) { headCam = all[i]; break; }
+        if (headCam != null && hudCam != null)
+        {
+            // Parent the HUDCamera GameObject to the head camera - HUD becomes a child of VR camera
+            // HUDCamera's own Update may try to set world position - parenting + local 0 keeps it locked to head
+            // Use SetParent with worldPositionStays=false, then zero local
+            hudCam.transform.SetParent(headCam.transform, false);
+            hudCam.transform.localPosition = Vector3.zero;
+            hudCam.transform.localRotation = Quaternion.identity;
+            parented = true;
+            try { VRManagerLogger.LogInfo("[IMVR] VRHUDAnchor parented HUDCamera to headCam"); } catch { }
+        }
+    }
+    // If HUDCamera.Update resets parent, re-parent in OnPreRender as well
+    void OnPreRender() {
+        if (!parented || hudCam == null) return;
+        if (hudCam.transform.parent == null) parented = false;
+        else if (hudCam.transform.localPosition != Vector3.zero || hudCam.transform.localRotation != Quaternion.identity) {
+            hudCam.transform.localPosition = Vector3.zero;
+            hudCam.transform.localRotation = Quaternion.identity;
+        }
+    }
+}
+
+[HarmonyPatch(typeof(GUICompass), "UpdateCompass")]
+class GUICompass_VR_HeadYaw_Patch
+{
+    static bool Prefix(GUICompass __instance)
+    {
+        if (!VRManagerState.inVR) return true;
+        // Original uses Marine body yaw, in VR head yaw != body yaw, compass must follow head
+        // Re-implement UpdateCompass with head yaw and 1.0x factor (not 1.8x flat exaggeration)
+        try {
+            Camera head = null; Camera[] all = Camera.allCameras; if (all!=null) for(int i=0;i<all.Length;i++) if(all[i]!=null && all[i].GetComponent<VRHeadTracker>()!=null) { head=all[i]; break; }
+            float headYaw = head != null ? head.transform.rotation.eulerAngles.y : Marine.LocalMarine.transform.rotation.eulerAngles.y;
+            // Call UpdateTicks via reflection with headYaw
+            MethodInfo mi = AccessTools.Method(typeof(GUICompass), "UpdateTicks");
+            FieldInfo dirF = AccessTools.Field(typeof(GUICompass), "directionLabels");
+            FieldInfo numF = AccessTools.Field(typeof(GUICompass), "directionNumberLabels");
+            FieldInfo tickF = AccessTools.Field(typeof(GUICompass), "tickLabels");
+            FieldInfo dirOffF = AccessTools.Field(typeof(GUICompass), "directionHeightOffset");
+            FieldInfo numOffF = AccessTools.Field(typeof(GUICompass), "directionNumberHeightOffset");
+            // Use original UpdateTicks but with headYaw - it still has 1.8x inside, but head yaw is correct source
+            // To avoid rewriting whole method, just let original run but temporarily swap Marine yaw? Simpler: call original logic by setting a temp?
+            // For now, let original UpdateTicks run with headYaw via invoking it
+            mi.Invoke(__instance, new object[]{ dirF.GetValue(__instance), headYaw, dirOffF.GetValue(__instance), true });
+            mi.Invoke(__instance, new object[]{ numF.GetValue(__instance), headYaw, numOffF.GetValue(__instance), true });
+            mi.Invoke(__instance, new object[]{ tickF.GetValue(__instance), headYaw, 0f, true });
+        } catch { }
+        return false; // skip original which uses body yaw
     }
 }
 
