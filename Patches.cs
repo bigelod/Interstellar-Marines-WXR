@@ -252,6 +252,7 @@ class NoHeadExhaustion_VR_Patch
 [HarmonyPatch(typeof(Helmet), "InitFirstPersonCamera")]
 class Helmet_VR_NearClip
 {
+    static bool loggedRealFov = false;
     static void Postfix(Camera ___playerCamera, Transform ___visorTransform, Vector3 ___helmetInitialOffset)
     {
         if (!VRManagerState.inVR) return;
@@ -264,6 +265,20 @@ class Helmet_VR_NearClip
             ___playerCamera.nearClipPlane = 0.18f;
             ___playerCamera.farClipPlane = 80f;
             ___playerCamera.fieldOfView = 98f;
+            // Log what the camera ACTUALLY renders, so the declared screen_fov can be
+            // compared against it. Unity's fieldOfView is vertical; horizontal depends on
+            // aspect. Declaring less than these shrinks the view toward the centre.
+            if (!loggedRealFov)
+            {
+                loggedRealFov = true;
+                try {
+                    float fovY = ___playerCamera.fieldOfView;
+                    float fovX = 2f * Mathf.Atan(Mathf.Tan(fovY * 0.5f * Mathf.Deg2Rad) * ___playerCamera.aspect) * Mathf.Rad2Deg;
+                    VRManagerLogger.LogInfo("[IMVR] Camera real FOV: vertical=" + fovY.ToString("F1") + " horizontal=" + fovX.ToString("F1")
+                        + " aspect=" + ___playerCamera.aspect.ToString("F3")
+                        + " pixels=" + ___playerCamera.pixelWidth + "x" + ___playerCamera.pixelHeight);
+                } catch { }
+            }
             // FIX 4 - Removed culling of layers 9/10 - was hiding weapon/hands
             // Old: ___playerCamera.cullingMask &= ~(1 << 9); etc.
         }
@@ -341,8 +356,15 @@ public class VRGlassAnchor : MonoBehaviour
     Vector3 originalLocalPos;
     Quaternion originalLocalRot;
     Vector3 originalLocalScale;
-    float vrHudScale = 0.8f; // Default - overridden by config.txt if present (see LoadHudScaleFromConfig)
-    static float cachedHudScale = -1f;
+    // Fallback when config.txt is missing - overridden by LoadHudScaleFromConfig.
+    // 0.62 is measured from the owner's target rect: the binding constraints are the
+    // bottom status row (needs <= 0.63) and the compass bar (needs <= 0.66).
+    // NOTE: this is NOT the HUD UI Root scale. FIXED29 established that scaling HUD UI
+    // Root moves HUDCamera and breaks the bend pipeline, so the HUD only appears when
+    // paused - that line still reads origHudRootScale and must stay at 1.0. This value
+    // now feeds VRHudSafeArea instead, which scales the canvas CONTENT.
+    float vrHudScale = 0.62f;
+    static float cachedHudScale = 0.62f;
     static float lastConfigCheckTime = 0f;
     static float LoadHudScaleFromConfig(float fallback)
     {
@@ -455,6 +477,12 @@ public class VRGlassAnchor : MonoBehaviour
         // Menus / paused / not in VR = full normal scale. CanvasScaler is universal, so we MUST restore here, not just when helmet is up.
         bool inGameplay = VRManagerState.inVR && Marine.LocalMarine != null;
         try { if (GameManager.IsPaused) inGameplay = false; } catch {}
+        // Shrink the screen-anchored HUD toward the centre of the view. This is the one
+        // mechanism that works - it gives the widgets a smaller PARENT RECT instead of
+        // scaling the canvas, so edge-anchored elements move inward too. See
+        // VRHudSafeArea.cs for why hudScale, UV, frustum, rect and UI Root scale all failed.
+        // Called for both branches: inactive restores scale 1 for menus and pause.
+        try { VRHudSafeArea.Apply(vrHudScale, inGameplay); } catch {}
         if (!inGameplay) { RestoreUniversalScale(); return; }
         if (Marine.LocalMarine == null) return;
         Camera headCam = null;
@@ -504,7 +532,8 @@ public class VRGlassAnchor : MonoBehaviour
                             Transform hudRoot = HUDCamera.Instance.transform.parent;
                             if (hudRoot != null) {
                                 if (origHudRootScale.x == 0f) origHudRootScale = hudRoot.localScale;
-                                hudRoot.localScale = origHudRootScale * vrHudScale; // 0.8 = 80% original size, 0.6 was previous, 1.0 = full
+                                hudRoot.localScale = origHudRootScale; // FIXED29: Keep 1.0 - scaling UI Root breaks HUDCamera bend pipeline, HUD only visible when paused (restored to 1.0)
+                                hudRoot.localPosition = Vector3.zero; // ensure not offset from FIXED27 centering
                             }
                         }
                     } catch {}
@@ -680,6 +709,11 @@ public class VRInputRunner : MonoBehaviour
 {
     void Update()
     {
+        try { VRManager.PollConfig(); } catch { }
+        // Up/down while paused nudges screen_fov by 10 and writes it back to config.txt.
+        // Runs before PollConfig would overwrite it - Persist rewrites the file, so the
+        // 2s poll reads back the value we just set rather than reverting it.
+        try { VRFovTuner.Update(); } catch { }
         try { VRInput.UpdateFrame(); }
         catch (Exception e) { VRManagerLogger.LogError("[IMVR] VRInput Update failed: " + e); }
         if (VRManagerState.verboseDebug && Time.frameCount % 60 == 0)

@@ -7,6 +7,14 @@ public class VRWeapon : MonoBehaviour
     RangedWeapon rw;
     Transform muzzle;
 
+    // Haptics: buzz the dominant hand whenever the ammo counter drops.
+    // Driving it off the counter rather than off the Fire input means it fires once
+    // per round actually spent - so full-auto buzzes per shot, a dry trigger pull
+    // buzzes not at all, and a shot the game refused (no ammo, reloading, jammed)
+    // produces no phantom kick.
+    const int HAPTIC_SHOT_FRAMES = 6;
+    int lastAmmo = -1;
+
     void Awake()
     {
         rw = GetComponent<RangedWeapon>();
@@ -17,23 +25,38 @@ public class VRWeapon : MonoBehaviour
     {
         if (rw == null || !rw.IsLocallyControlled) return;
         int hand = rightDominant ? XRAPI.RIGHT : XRAPI.LEFT;
+
+        // Ammo went down = a round was spent. A reload or a weapon swap raises the
+        // count, so only a decrease counts, and the first frame only primes lastAmmo.
+        try
+        {
+            int ammoNow = rw.GetAmmoCount();
+            if (lastAmmo >= 0 && ammoNow < lastAmmo)
+            {
+                XRAPI.SendHapticVibration(hand, HAPTIC_SHOT_FRAMES);
+            }
+            lastAmmo = ammoNow;
+        }
+        catch { }
+
         Vector3 p;
         Quaternion r;
         if (!XRAPI.XR_GetControllerPose(hand, out p, out r)) return;
 
-        p = new Vector3(p.x, p.y, -p.z);
-        Vector3 e = r.eulerAngles;
-        r = Quaternion.Euler(-e.x, -e.y, e.z);
-
+        // Pose arrives already normalised and already in Unity's frame - XRAPI.ToUnity
+        // does the RH->LH swap once at ingest. Do not swap it again here.
+        //
+        // flipHands is NOT a handedness swap - it is a per-device controller
+        // orientation quirk, so it stays here and is still correct to test.
         // Config only, no handsfix.txt - VRManager.flipHands is the toggle.
-        // Raw pose after -e.x/-e.y is upside-down on Quest 3, so:
+        // Converted pose is upside-down on Quest 3, so:
         // flipHands=false (Quest 3 default) = apply roll 180 to make it upright
         // flipHands=true  (Quest 2 / Pico) = leave it upside-down, that is the Quest 2 state
         // Roll, not yaw - yaw 180 flips aim backwards, roll flips gun upside-down only.
         if (!VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
 
         Vector3 headWorld = Vector3.zero;
-        Quaternion headWorldRot = Quaternion.identity;
+        Quaternion bodyRot = Quaternion.identity;
         bool foundHead = false;
 
         Camera[] all = Camera.allCameras;
@@ -44,7 +67,6 @@ public class VRWeapon : MonoBehaviour
                 if (all[i] != null && all[i].GetComponent<VRHeadTracker>() != null)
                 {
                     headWorld = all[i].transform.position;
-                    headWorldRot = all[i].transform.rotation;
                     foundHead = true;
                     break;
                 }
@@ -55,20 +77,27 @@ public class VRWeapon : MonoBehaviour
             Transform refT = VRManagerState.VRRoot.transform;
             Vector3 hPos = Vector3.zero; Quaternion hRot = Quaternion.identity;
             XRAPI.XR_GetHeadPose(out hPos, out hRot);
-            Vector3 lean = new Vector3(hPos.x, hPos.y, -hPos.z);
-            Vector3 he = hRot.eulerAngles; hRot = Quaternion.Euler(-he.x, -he.y, he.z);
+            // Already converted at ingest - hPos is the lean directly
             Vector3 baseHead = refT.position + refT.up * 1.62f;
-            headWorld = baseHead + refT.rotation * lean;
-            headWorldRot = refT.rotation * hRot;
+            headWorld = baseHead + refT.rotation * hPos;
         }
+        // FIXED2: Use BODY rotation, not head rotation, for the gun.
+        // p is head-relative (small) - VRRoot.TransformPoint(p) = feet + p = floor, invisible (that's why FIXED gave no hands).
+        // headWorld + headWorldRot * p = correct height but head yaw moves gun (old bug).
+        // headWorld (position only) + bodyRot * p = correct height AND head yaw does NOT move gun.
+        if (VRManagerState.VRRoot != null) bodyRot = VRManagerState.VRRoot.transform.rotation;
+        else if (Marine.LocalMarine != null) bodyRot = Quaternion.Euler(0f, Marine.LocalMarine.transform.eulerAngles.y, 0f);
 
-        p = headWorld + headWorldRot * p;
-        r = headWorldRot * r;
+        p = headWorld + bodyRot * p;
+        r = bodyRot * r;
 
         Transform model = null;
         if (rw.WeaponModel != null) model = rw.WeaponModel.transform;
         if (model != null)
         {
+            // Detach from WorldCamera (head) to VRRoot (body) so head doesn't drag it after LateUpdate.
+            // Now p is headWorld-based, so this detach keeps it at eye height, not floor.
+            if (model.parent != null) { Transform p2 = model.parent; while (p2 != null) { if (p2.GetComponent<VRHeadTracker>() != null) { model.SetParent(null, true); break; } p2 = p2.parent; } } // detach from head chain to scene root, NOT VRRoot - VRRoot is Destroy()ed on level change and would take gun with it
             model.position = p;
             model.rotation = r;
         }

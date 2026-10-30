@@ -182,7 +182,7 @@ public static class XRAPI
             mode3D = 0; // mono for Interstellar Marines
             leftHapticFrames = 0;
             rightHapticFrames = 0;
-            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 0 0 104.5 104.5");
+            string msg = BuildOutPacket();
             byte[] bytes = Encoding.ASCII.GetBytes(msg);
             if (sendClient != null)
             {
@@ -203,11 +203,45 @@ public static class XRAPI
         }
     }
 
+    // Haptics are a DURATION IN FRAMES, per hand, not an amplitude - we are telling
+    // the runtime how long to buzz. Sending 0 does not stop a running buzz: the
+    // runtime only stores values greater than zero. So the number has to be topped
+    // up while the condition holds and decayed once per frame by TickHaptics.
+    public static void TickHaptics()
+    {
+        if (leftHapticFrames > 0) leftHapticFrames--;
+        if (rightHapticFrames > 0) rightHapticFrames--;
+    }
+
+    // The angle the runtime paints the captured frame across, in degrees. It does NOT
+    // have to equal the camera's real FOV - see config.txt screen_fov. Lower = the same
+    // scene shown smaller and more central, at full render resolution.
+    public static float GetDeclaredFov() { return targetFovX; }
+
+    public static void SetDeclaredFov(float fovDegrees)
+    {
+        if (Mathf.Abs(targetFovX - fovDegrees) > 0.01f)
+        {
+            VRManagerLogger.LogInfo("[IMVR] Declared FOV -> " + fovDegrees.ToString(CultureInfo.InvariantCulture) + " (was " + targetFovX.ToString(CultureInfo.InvariantCulture) + ")");
+        }
+        targetFovX = fovDegrees;
+        targetFovY = fovDegrees;
+    }
+
+    // Always build the 7278 packet through this. string.Format with InvariantCulture is
+    // not optional: targetFovX.ToString() under a comma-decimal locale emits "104,5",
+    // which turns one field into two and corrupts every field after it.
+    static string BuildOutPacket()
+    {
+        return string.Format(CultureInfo.InvariantCulture, "{0} {1} {2} {3} {4} {5}",
+            leftHapticFrames, rightHapticFrames, modeVR, mode3D, targetFovX, targetFovY);
+    }
+
     public static void SendHapticUpdate()
     {
         try
         {
-            string msg = string.Format(CultureInfo.InvariantCulture, "0 0 " + modeVR.ToString() + " " + mode3D.ToString() + " 104.5 104.5");
+            string msg = BuildOutPacket();
             byte[] bytes = Encoding.ASCII.GetBytes(msg);
             if (sendClient != null)
             {
@@ -285,9 +319,10 @@ public static class XRAPI
             }
             lock (lockObj)
             {
-                latest.leftRot = lQuat; latest.leftPos = lPos; latest.leftStick = lStick;
-                latest.rightRot = rQuat; latest.rightPos = rPos; latest.rightStick = rStick;
-                latest.headRot = hQuat; latest.headPos = hPos;
+                // Normalised and converted to Unity's frame here and nowhere else - see ToUnity above
+                latest.leftRot = ToUnity(lQuat); latest.leftPos = ToUnity(lPos); latest.leftStick = lStick;
+                latest.rightRot = ToUnity(rQuat); latest.rightPos = ToUnity(rPos); latest.rightStick = rStick;
+                latest.headRot = ToUnity(hQuat); latest.headPos = ToUnity(hPos);
                 latest.ipd = ipd; latest.fovH = fovH; latest.fovV = fovV; latest.frameId = frameId;
                 latest.lGrip = lGrip; latest.lMenu = lMenu; latest.lThumbPress = lThumbPress; latest.lThumbLeft = lThumbLeft; latest.lThumbRight = lThumbRight;
                 latest.lThumbUp = lThumbUp; latest.lThumbDown = lThumbDown; latest.lTrigger = lTrigger; latest.lX = lX; latest.lY = lY;
@@ -305,6 +340,35 @@ public static class XRAPI
     static float ParseFloat(string[] parts, int i)
     {
         return float.Parse(parts[i], CultureInfo.InvariantCulture);
+    }
+
+    // ===== HANDEDNESS + NORMALISATION - DONE ONCE, HERE, AT INGEST =====
+    // Every pose that leaves XR_GetHeadPose / XR_GetControllerPose is already in
+    // Unity's left-handed frame and already unit length. Do NOT convert again
+    // downstream: a second swap applies the mirror twice and cancels it out.
+    //
+    // Previously VRHeadTracker and VRWeapon each did their own
+    // "pos.z = -z; rot = Euler(-e.x, -e.y, e.z)" from the raw packet. That is a
+    // decompose-negate-recompose, not a mirror: it agrees with the real thing
+    // for a rotation about one axis only, and diverges once pitch and roll are
+    // combined (head tilted sideways while looking up). The component form below
+    // is the correct right-handed -> left-handed flip for a negated Z axis.
+    //
+    // Normalisation is unconditional because the XrAPI UDP Tester's packets are
+    // routinely a few percent long, and a non-unit quaternion gives a stretched,
+    // asymmetric basis - and we take .eulerAngles of these, which is meaningless
+    // for a non-unit value.
+    static Quaternion ToUnity(Quaternion q)
+    {
+        float m = Mathf.Sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+        if (m < 0.000001f) return Quaternion.identity;
+        float inv = 1f / m;
+        return new Quaternion(-q.x * inv, -q.y * inv, q.z * inv, q.w * inv);
+    }
+
+    static Vector3 ToUnity(Vector3 p)
+    {
+        return new Vector3(p.x, p.y, -p.z);
     }
 
     public static bool XR_GetHeadPose(out Vector3 pos, out Quaternion rot)

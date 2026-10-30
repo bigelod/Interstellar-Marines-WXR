@@ -1,0 +1,31 @@
+# BUG_FIXES.md — Bugs Fixed (Short Form)
+
+- **Sync pixel too small:** `syncPixelSize` 100f -> 256f, then rebased to 3x only (`50f/pixelWidth` -> `150f/pixelWidth`, fallback `0.04f` -> `0.12f`) — visible on 3840-wide target.
+- **Gun upside-down on Quest 3:** Raw pose is upside-down, `flipHands` used yaw not roll — changed to `if (!flipHands) r = r * Euler(0,0,180)` roll 180, `flipHands=false` = Quest 3 upright.
+- **Gun moved with head angle:** `VRWeapon` used head-relative pose + `RangedWeapon.AttachToCamera()` parents to `WorldCamera` — double-counted head. Fix: detach to scene root, head position + body rotation.
+- **Gun at floor when absolute:** `VRRoot.TransformPoint(p)` put gun at floor (no hands) — `VRRoot` is body yaw only, no head height. Fix: head position for height, body rotation for orientation.
+- **Gun destroyed on level change:** Detaching to `VRRoot` killed gun because `VRRoot` is `Destroy()`ed on level change — detach to scene root instead.
+- **HUD flicker:** `VRHUDAnchor` copying in `LateUpdate` fought `HUDCamera.Update` (mouse pose) + `CopyParentCameraSettings` — fix: parent, don't copy; per-instance `HashSet`, only re-parent when needed.
+- **HUD flicker from Animator:** Forcing `localPos=(0,0,0)` / `localRot=identity` fought Animator `helmetClose` pose `(1,359.7,0)` — fix: preserve `originalLocalPos/Rot` from `Awake`.
+- **HUD missing — glass killed:** Old patch set `glassIntensity=0`, `glassTexture=null`, `clearFlags=SolidColor`, `backgroundColor=transparent` — killed `doubleGlass` blend. Fix: only set `hudScale=1`, `distort=0`, never touch glass/culling/clear.
+- **HUD missing — wrong layer filter:** Filter required layer 14, but `Glass_HUD` is layer 0 (children meshes are 14) — fix: match name only.
+- **Helmet black disc:** Physical helmet layer 8 `CH_Marine1pHelmet` / `CH_Marine1pHelmetGlass` sits below VR camera — fix: hide layer 8 renderers, not `Glass_HUD` layer 14.
+- **HUD rotation broken, translation correct:** `HUDCamera.Update` ran before `VRHeadTracker.LateUpdate`, copied mouse pose — fix: `VRHUDAnchor.OnPreRender` copy VR pose after `LateUpdate`.
+- **HUD NGUI flicker:** Anchoring both `HUDCamera` and NGUI camera (culling 65536) fought parent — fix: only anchor glass mesh, NGUI camera stays.
+- **HUD scale no effect — mesh:** Scaling glass mesh 0.75 / 0.6 did nothing — `doubleGlassMaterial` projects in screen-space, mesh scale irrelevant.
+- **HUD scale no effect — hudScale:** Setting `HUDCamera.hudScale=0.6` only lowered quality (1280 -> 768), same real estate.
+- **HUD scale no effect — UV:** `doubleGlassMaterial.mainTextureScale=(0.6,0.6)` ignored — shader resets it.
+- **HUD scale no effect — frustum:** Changing `HUDCamera` frustum did nothing — wrong camera, bend camera not UI camera.
+- **HUD scale — NGUI frustum:** Changing NGUI `Camera` frustum + `CanvasScaler.scaleFactor` only shrank compass, bottom elements edge-anchored stayed.
+- **HUD scale — rect:** `HUDCamera.rect=(0.2,0.2,0.6,0.6)` caused cyan border (clear color) filling screen, game inset small.
+- **HUD scale — UI Root worked:** Scaling `HUD UI Root` (parent of `HUDCamera`) by 0.6 worked — user said "Yay you did it!"
+- **HUD scale — centering left shift:** `HUD UI Root` at 501 vs screen center 516 (`Fake 3D UI Root`) caused left shift when scaled — fix: `localPosition = fakeRoot.position - hudRoot.parent.position` (+15 X).
+- **HUD only when paused:** Scaling `HUD UI Root` to 0.65 breaks bend pipeline — paused restores to 1.0 and HUD appears. Fix (FIXED29): keep UI Root at 1.0.
+- **Input leak — Cursor.visible:** `if (Cursor.visible && Cursor.lockState != Locked) return true` always allowed input in Winlator (cursor always visible) — removed check, only allow in menus/paused.
+- **Input leak — raw Input:** Game reads raw `Input.GetAxis("Mouse X/Y")`, `GetKey(W/A/S/D)`, etc. bypassing `InputManager.IsInput` — patched `GetAxis`, `GetAxisRaw`, `GetKey`, `GetKeyDown`, `GetMouseButton` to 0/false in VR gameplay only.
+- **Compile — interpolated strings:** C# 3 project, `$"..."` gives CS8024 — rewritten with `+` concatenation, no `?.`, no pattern matching.
+- **Compile — Path.Combine:** 3-arg `Path.Combine` doesn't exist — nested `Path.Combine(Path.Combine(dllDir,".."),"config.txt")`.
+- **Compile — Fog API:** `RenderSettings.fogStartDistance` / `fogMode` don't exist in Unity 4 (uses `fogStart`/`fogEnd`), class-level code gave CS8024 / CS0708 / CS0825 — removed fog block.
+- **HUDTreeDumper not printing:** `verboseDebug` gated all dumps, coroutine killed on `Helmet` recreate, dumped too early — fix: dump on F9 via `HUDTreeDumpRunner` (`DontDestroyOnLoad`), ignores `verboseDebug` for F9, writes to DLL directory not `Z:/tmp/xr`.
+- **PostFX broke HUD:** `EnforceNoPostFX()` every frame disabled Bloom/Blur on `HUDCamera` — broke blend. Fix: gate to `WorldCamera` only, removed in SAFE rollback.
+- **Resolution broke HUD:** `Screen.SetResolution` + RT resize while bound broke `CleanToBlendTarget` / `BendToDoubleGlassTarget` — rolled back.

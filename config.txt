@@ -3,4 +3,27 @@ turn_speed=80
 deadzone=0.20
 flipHands=false
 # set true for Pico 4 Ultra if hands are upside down vs Quest 3
-hudScale=0.8
+
+# Shrinks the screen-anchored HUD (compass + squad info at the top, ammo / TP /
+# health at the bottom) toward the centre of the view so nothing sits in the
+# part of the frame a headset cannot show.
+# Lower = smaller and further in. 0.62 is measured from the target rect.
+# 1.0 disables the mechanism entirely. Re-read from disk every 2s, so you can
+# tweak this while the game is running.
+# World-space diamond waypoint markers are deliberately NOT affected.
+hudScale=0.62
+
+# How wide an angle WinlatorXR paints the captured frame across, in degrees.
+# This does NOT have to match the FOV the game renders with (98 vertical).
+# Declaring LESS shows the SAME scene, shrunk toward the centre of the view, at
+# full render resolution - no black borders, no lost pixels, and the sync pixel
+# stays in the top-left corner. That makes it the cheap way to fit everything
+# inside the part of the panel the headset actually shows.
+# 104.5 is what HWXR and opentrackWXR send and is the long-standing default.
+# Try 80, then 70, then 60 - lower is smaller and more central.
+#
+# ADJUSTABLE IN THE HEADSET: pause the game, then tap up / down (the left
+# thumbstick sends arrow keys in screen mode) to step this by 10. The value is
+# written straight back into this line, so it survives the session.
+# Also re-read from disk every 2s if you prefer to edit it by hand.
+screen_fov=104.5

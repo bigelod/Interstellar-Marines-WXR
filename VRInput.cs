@@ -21,6 +21,9 @@ public static class VRInput
 
     static float holdTriggerCooldown = 0f;
 
+    // Longer than VRWeapon.HAPTIC_SHOT_FRAMES (6) so a switch does not feel like a shot
+    const int HAPTIC_SWITCH_FRAMES = 10;
+
     static int currentSlot = 1;
     static bool slotInitialized = false;
     static float lastSlotSwitch = -10f;
@@ -184,8 +187,14 @@ public static class VRInput
         Set("GamepadMenu", state.lMenu);
         Set("MissionOverview", state.lMenu);
 
-        // Update VR/2D mode based on game state (title/paused = 2D)
+        // Update VR/2D mode based on game state (title/paused = 2D).
+        // This also sends the 7278 packet, so any haptic duration set during this
+        // frame goes out with it.
         try { XRAPI.UpdateVRModeFromGameState(); } catch { }
+
+        // Decay haptic durations after the packet is sent, so a buzz set this frame
+        // is reported at full length once before it starts running down.
+        try { XRAPI.TickHaptics(); } catch { }
 
     }
 
@@ -198,6 +207,25 @@ public static class VRInput
         Set("Slot03", false);
         Set("Slot0" + slot, true);
         currentSlot = slot;
+
+        // Buzz the dominant hand on a weapon switch, longer than a shot
+        // (HAPTIC_SWITCH_FRAMES vs VRWeapon.HAPTIC_SHOT_FRAMES) so the two are
+        // distinguishable by feel.
+        //
+        // This also makes the ammo-counter haptic honest: drawing a weapon with a
+        // lower round count is a drop the player can feel a reason for, instead of
+        // a mystery kick. Overlap is safe - SendHapticVibration takes the max of
+        // the pending and the new duration, so a switch during a burst reads as one
+        // longer buzz rather than two.
+        //
+        // Only called from a real stick-driven switch. The Slot01 priming at spawn
+        // sets the override directly and deliberately does not come through here.
+        try
+        {
+            int hand = (VRManager.configDominant == "right") ? XRAPI.RIGHT : XRAPI.LEFT;
+            XRAPI.SendHapticVibration(hand, HAPTIC_SWITCH_FRAMES);
+        }
+        catch { }
     }
 }
 

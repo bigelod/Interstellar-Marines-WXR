@@ -31,6 +31,12 @@ public class VRManager : BaseUnityPlugin
     public static float deadzone = 0.2f;
     public static bool flipHands = false;
 
+    // Resolved once in Awake, then re-read every 2s by PollConfig so values can be
+    // tuned with the game running - editing files on a headset is painful enough
+    // without a restart per attempt.
+    public static string configPath = null;
+    static float lastConfigPoll = -999f;
+
     void Awake()
     {
         // Unity 4 compat - BepInEx thinks isBatchMode exists
@@ -51,7 +57,8 @@ public class VRManager : BaseUnityPlugin
         VRManagerLogger.LogError = LogError;
         VRManagerLogger.LogInfo = LogInfo;
 
-        LoadConfig();
+        ResolveConfigPath();
+        ParseConfig();
         XRAPI.XR_Init();
 
         Harmony harmony = new Harmony("im.vr.winlatorxr");
@@ -86,7 +93,7 @@ public class VRManager : BaseUnityPlugin
 
     void OnDestroy(){ XRAPI.Shutdown(); }
 
-    void LoadConfig()
+    void ResolveConfigPath()
     {
         try{
             string basePath = Paths.PluginPath;
@@ -96,8 +103,26 @@ public class VRManager : BaseUnityPlugin
                 string dir = Path.GetDirectoryName(Info.Location);
                 path = Path.Combine(dir, "config.txt");
             }
-            if(!File.Exists(path)) return;
-            string[] lines = File.ReadAllLines(path);
+            if(File.Exists(path)) configPath = path;
+        } catch(Exception e){
+            VRManagerLogger.LogError("[IMVR] Config path error: "+e);
+        }
+    }
+
+    // Called every frame from VRInputRunner, rate-limited to 2s. Cheap, and it means
+    // screen_fov and the rest can be dialled in live without a rebuild or a restart.
+    public static void PollConfig()
+    {
+        if(Time.realtimeSinceStartup - lastConfigPoll < 2f) return;
+        lastConfigPoll = Time.realtimeSinceStartup;
+        ParseConfig();
+    }
+
+    public static void ParseConfig()
+    {
+        try{
+            if(configPath == null || !File.Exists(configPath)) return;
+            string[] lines = File.ReadAllLines(configPath);
             foreach(string line in lines){
                 string t = line.Trim();
                 if(t.StartsWith("#") || t.Length==0) continue;
@@ -109,6 +134,15 @@ public class VRManager : BaseUnityPlugin
                 if(k=="turn_speed"){ float f; if(float.TryParse(v, out f)) turnSpeed=f; }
                 if(k=="deadzone"){ float f; if(float.TryParse(v, out f)) deadzone=f; }
                 if(k=="fliphand" || k=="fliphands" || k=="flip_hands" || k=="fliphands") flipHands = (v=="true" || v=="1" || v=="yes");
+                // How wide an angle the runtime should paint this frame across. This does
+                // NOT have to match what the camera rendered: declaring less than the true
+                // FOV shows the SAME world, shrunk toward the centre of the view, at full
+                // resolution. That is the cheap way to fit everything inside the part of
+                // the panel a headset actually shows - no viewport rect, no black borders,
+                // no lost pixels, and the sync pixel does not move.
+                if(k=="screen_fov" || k=="screenfov" || k=="vr_fov" || k=="fov"){
+                    float f; if(float.TryParse(v, out f) && f > 1f && f <= 180f) XRAPI.SetDeclaredFov(f);
+                }
             }
             VRInput.SetConfig(deadzone);
         } catch(Exception e){

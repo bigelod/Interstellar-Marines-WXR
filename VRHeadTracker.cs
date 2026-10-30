@@ -22,11 +22,10 @@ public class VRHeadTracker : MonoBehaviour
         Vector3 hPos = Vector3.zero; Quaternion hRot = Quaternion.identity;
         if (XRAPI.XR_GetHeadPose(out hPos, out hRot))
         {
-            Vector3 lean = new Vector3(hPos.x, hPos.y, -hPos.z);
-            lean = Vector3.ClampMagnitude(lean, 0.3f);
+            // Pose arrives already normalised and already in Unity's frame - XRAPI.ToUnity
+            // does the RH->LH swap once at ingest. Do not swap it again here.
+            Vector3 lean = Vector3.ClampMagnitude(hPos, 0.3f);
             transform.localPosition = baseLocalPos + lean;
-            Vector3 e = hRot.eulerAngles;
-            hRot = Quaternion.Euler(-e.x, -e.y, e.z);
             transform.localRotation = baseLocalRot * hRot;
         }
     }
