@@ -1,11 +1,11 @@
 # Interstellar-Marines-WXR
 An attempt to do a "monocular VR" 6DOF experience for **Interstellar Marines** on **Standalones** via **WinlatorXR**
 
-Created with the help of Meta.AI
+Created with the help of Meta.AI and Claude Code Opus 5 (Medium effort)
 
 Thanks to Luboš, GmoLargey, and others for their work on [WinlatorXR](https://github.com/WinlatorXR/WinlatorXR) and everyone else who had contributed to portable PC gaming via Winlator on other platforms
 
-The text below is also written with help of Meta.AI and will be manually improved as the project continues and behavior solidifies
+The text below is also written with help of Meta.AI and Claude Code and will be manually improved as the project continues and behavior solidifies
 
 ### How it works
 - `Helmet.InitFirstPersonCamera()` -> `VRHeadTracker` attached to Helmet base (not just WorldCamera) so visor + camera move together. Lean clamped to 12cm, no roomscale walking.
