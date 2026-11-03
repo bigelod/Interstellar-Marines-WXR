@@ -65,6 +65,20 @@ FINDINGS #12).
 
 ## Where the README and `Docs/MetaAI/` disagree with the code
 
+> **The engine is Unity 5.6.7, not Unity 4.** BepInEx logs
+> `Running under Unity v5.6.7.15207619` on startup. Every doc in this repo,
+> this set included, previously said Unity 4 — inherited from `Docs/MetaAI/`
+> and never checked. My own stated reason ("`UnityEngine.dll` is a CLR 2.0
+> assembly") was bad evidence: that is the .NET 3.5 scripting runtime, which
+> Unity 5.x also uses, and says nothing about the engine version.
+>
+> This matters because it changes what is available. uGUI, `RectTransform`,
+> the PostProcessing stack v1, `CanvasScaler` and `Cursor.lockState` are all
+> Unity 5-era APIs, and their presence had been treated as surprising. It also
+> means `LangVersion 3` in the csproj is a deliberate project choice rather
+> than an engine constraint — the C# 3 restrictions are real, but self-imposed.
+
+
 Worth reading before trusting either. The code is what ships.
 
 | Claim | Where | Reality |

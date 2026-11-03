@@ -88,7 +88,9 @@ public class VRWeapon : MonoBehaviour
         if (VRManagerState.VRRoot != null) bodyRot = VRManagerState.VRRoot.transform.rotation;
         else if (Marine.LocalMarine != null) bodyRot = Quaternion.Euler(0f, Marine.LocalMarine.transform.eulerAngles.y, 0f);
 
-        p = headWorld + bodyRot * p;
+        // handHeight lifts the weapon with the eye, so raising the camera does not leave
+        // the gun down by the chest where the body occludes it.
+        p = headWorld + bodyRot * (p + new Vector3(0f, VRManager.handHeight, 0f));
         r = bodyRot * r;
 
         Transform model = null;

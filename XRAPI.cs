@@ -38,6 +38,22 @@ public static class XRAPI
 
     // Sending to WinlatorXR: 127.0.0.1:7278 format: L_HAPTICS R_HAPTICS MODE_VR MODE_3D FOVX FOVY
     static IPEndPoint sendEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 7278);
+    // Signature of the last logged game-state, so State: lines appear once per
+    // transition instead of once per frame. Letters, in order:
+    //   V=VR mode  G=inGame  P=paused | c=localChar r=runningGame m=marine a=alive
+    //   g=GameManager.IsPaused  t=timeScale==0  f=notInGame fallback  u=UI wants pointer
+    static string lastStateSig = "";
+
+    // The recentre origin, subtracted from head AND hand positions alike.
+    // general_wxr/CLAUDE.md: "Convert each pose independently of the head. Share only the
+    // recentre origin." Sharing it is what keeps the hands in the right place relative to
+    // the head after a recentre - offsetting only the head would move the player's hands
+    // away from their body.
+    static Vector3 recenterOrigin = Vector3.zero;
+
+    static int rxTimeouts = 0;
+    static float lastRxTimeoutLog = -999f;
+
     static int leftHapticFrames = 0;
     static int rightHapticFrames = 0;
     static int modeVR = 1; // 1 to enable VR, 0 to disable VR
@@ -147,13 +163,25 @@ public static class XRAPI
                 byte[] data = client.Receive(ref any);
                 if (data == null || data.Length == 0) continue;
                 VRManagerState.rxTxFailCount = 0;
+                rxTimeouts = 0;
                 string s = Encoding.ASCII.GetString(data).Trim();
                 ParseString(s);
             }
             catch (SocketException)
             {
                 if (shouldExit) break;
-                VRManagerLogger.LogWarn("[IMVR] UDP Rx port failed, will try again");
+                // A 500ms ReceiveTimeout with no data is NORMAL whenever MODE_VR is 0 -
+                // the runtime is not sending, by design, while in menus. Logging every
+                // one buried the real signal under 267 identical lines on 1 Nov. Keep the
+                // signal, drop the spam: report at most every 5s, with the count.
+                rxTimeouts++;
+                float now = 0f;
+                try { now = Time.realtimeSinceStartup; } catch { }
+                if (now - lastRxTimeoutLog > 5f)
+                {
+                    lastRxTimeoutLog = now;
+                    VRManagerLogger.LogWarn("[IMVR] UDP Rx: no packets for a while (" + rxTimeouts + " timeouts). Normal if MODE_VR=0; a problem if it persists in gameplay.");
+                }
                 continue;
             }
             catch (Exception e)
@@ -371,11 +399,23 @@ public static class XRAPI
         return new Vector3(p.x, p.y, -p.z);
     }
 
+    // Makes wherever the player is standing right now the new origin. Bound to right
+    // thumbstick click - play-space position drifts over a long session.
+    public static void Recenter()
+    {
+        lock (lockObj)
+        {
+            if (!hasData) return;
+            recenterOrigin = latest.headPos;
+        }
+        VRManagerLogger.LogInfo("[IMVR] Recentred - origin now " + recenterOrigin.ToString("F2"));
+    }
+
     public static bool XR_GetHeadPose(out Vector3 pos, out Quaternion rot)
     {
         lock (lockObj)
         {
-            if (hasData) { pos = latest.headPos; rot = latest.headRot; return true; }
+            if (hasData) { pos = latest.headPos - recenterOrigin; rot = latest.headRot; return true; }
         }
         pos = Vector3.zero; rot = Quaternion.identity;
         rot = Quaternion.Euler(0, Input.GetAxis("Mouse X") * 2f, 0);
@@ -387,8 +427,8 @@ public static class XRAPI
         {
             if (hasData)
             {
-                if (hand == LEFT) { pos = latest.leftPos; rot = latest.leftRot; return true; }
-                else { pos = latest.rightPos; rot = latest.rightRot; return true; }
+                if (hand == LEFT) { pos = latest.leftPos - recenterOrigin; rot = latest.leftRot; return true; }
+                else { pos = latest.rightPos - recenterOrigin; rot = latest.rightRot; return true; }
             }
         }
         pos = Vector3.zero; rot = Quaternion.identity;
@@ -448,6 +488,14 @@ public static class XRAPI
             bool isInGame = VRManagerState.inVR;
             bool isPaused = false;
 
+            // Every individual signal is captured so the log can say WHICH one moved.
+            // Without this, a mode flip only ever reported its own result, which is how
+            // the Cursor.visible bug survived as long as it did.
+            bool sigLocalChar = false, sigRunning = false, sigMarine = false, sigAlive = false;
+            bool sigGmPaused = false, sigTimeScaleZero = false, sigNotInGameFallback = false;
+            bool sigUiBlocking = false;
+            float sigTimeScale = 1f;
+
             // Check if local character exists (in-game)
             if (Character.AllCharacters != null)
             {
@@ -456,6 +504,7 @@ public static class XRAPI
                     if (c != null && c.IsLocallyControlled)
                     {
                         isInGame = true;
+                        sigLocalChar = true;
                         break;
                     }
                 }
@@ -463,11 +512,12 @@ public static class XRAPI
 
             try
             {
-                bool cursorVisible = Cursor.visible;
-                bool cursorLocked = Cursor.lockState == CursorLockMode.Locked;
-
                 if (GameManager.Instance != null)
                 {
+                    sigRunning = GameManager.IsRunningGame;
+                    sigMarine = Marine.LocalMarine != null;
+                    sigAlive = sigMarine && Marine.LocalMarine.IsAlive;
+                    sigGmPaused = GameManager.IsPaused;
                     // RunningGame = actually in level, not main menu
                     isInGame = GameManager.IsRunningGame && Marine.LocalMarine != null && Marine.LocalMarine.IsAlive;
 
@@ -475,15 +525,33 @@ public static class XRAPI
                     isPaused = GameManager.IsPaused;
                 }
 
-                if (cursorVisible && !cursorLocked)
-                {
-                    isPaused = true;
-                }
+                // DO NOT reinstate a Cursor.visible test here. In Winlator the cursor is
+                // ALWAYS visible, so "cursorVisible && !cursorLocked" is permanently true
+                // and forces isPaused every frame. The 1 Nov 2026 logs show exactly that:
+                // "isInGame=True isPaused=True" in gameplay, MODE_VR pinned at 0, and 267
+                // receive timeouts because MODE_VR=0 stops the runtime sending any UDP at
+                // all. The identical test was removed from the input patches long ago for
+                // the same reason; this copy was missed.
 
                 // Fallback if GameManager not ready yet (main menu)
                 if (!isInGame)
                 {
                     isPaused = true;
+                    sigNotInGameFallback = true;
+                }
+            }
+            catch { }
+
+            // A menu that wants the pointer counts as paused: MODE_VR=0 hands screen
+            // control back to the runtime's own mouse emulation, which is what makes the
+            // menu usable at all. Same signal the game uses for cursor lock.
+            try
+            {
+                GameUI ui = GameUI.Instance;
+                if (ui != null && (ui.IsShowingMouseBlockingGUI || ui.IsShowingModalGUI))
+                {
+                    isPaused = true;
+                    sigUiBlocking = true;
                 }
             }
             catch { }
@@ -491,7 +559,8 @@ public static class XRAPI
             // Also check if timeScale is 0 (paused)
             try
             {
-                if (UnityEngine.Time.timeScale == 0f) isPaused = true;
+                sigTimeScale = UnityEngine.Time.timeScale;
+                if (sigTimeScale == 0f) { isPaused = true; sigTimeScaleZero = true; }
             }
             catch { }
 
@@ -499,22 +568,41 @@ public static class XRAPI
             if (!isInGame || isPaused)
             {
                 VRManagerState.inVR = false;
-                if (modeVR != 0)
-                {
-                    VRManagerLogger.LogInfo("[IMVR] Switching to 2D UI mode (MODE_VR=0) - not in-game or paused. isInGame=" + isInGame + " isPaused=" + isPaused);
-                }
                 modeVR = 0; // Non-VR / 2D screen mode per WinlatorXR spec
                 mode3D = 0; // flat
             }
             else
             {
                 VRManagerState.inVR = true;
-                if (modeVR != 1)
-                {
-                    VRManagerLogger.LogInfo("[IMVR] Switching to VR mode (MODE_VR=1) - in-game");
-                }
                 modeVR = 1; // VR mode
                 mode3D = 0; // mono for Interstellar Marines
+            }
+
+            // Log on any change to ANY contributing signal, not just when modeVR flips.
+            // Opening or closing the pause menu moves gmPaused and usually timeScale, so
+            // this fires there as well as on every mode change - and names the cause.
+            // Change-gated, so it is one line per transition rather than per frame.
+            string sig = (modeVR == 1 ? "V" : "-")
+                + (isInGame ? "G" : "-") + (isPaused ? "P" : "-")
+                + (sigLocalChar ? "c" : "-") + (sigRunning ? "r" : "-")
+                + (sigMarine ? "m" : "-") + (sigAlive ? "a" : "-")
+                + (sigGmPaused ? "g" : "-") + (sigTimeScaleZero ? "t" : "-")
+                + (sigNotInGameFallback ? "f" : "-") + (sigUiBlocking ? "u" : "-");
+            if (sig != lastStateSig)
+            {
+                string was = lastStateSig;
+                lastStateSig = sig;
+                VRManagerLogger.LogInfo("[IMVR] State: MODE_VR=" + modeVR
+                    + " isInGame=" + isInGame + " isPaused=" + isPaused
+                    + " | localChar=" + sigLocalChar
+                    + " runningGame=" + sigRunning
+                    + " marine=" + sigMarine
+                    + " alive=" + sigAlive
+                    + " gmPaused=" + sigGmPaused
+                    + " timeScale=" + sigTimeScale.ToString("0.00")
+                    + " notInGameFallback=" + sigNotInGameFallback
+                    + " uiWantsPointer=" + sigUiBlocking
+                    + "  [" + was + " -> " + sig + "]");
             }
         }
         catch (Exception e)

@@ -6,7 +6,7 @@ the list of disagreements.
 
 ## Environment facts, confirmed
 
-- **Unity 4** (`UnityEngine.dll` is a CLR 2.0 assembly), **BepInEx 5**,
+- **Unity 5.6.7**, **BepInEx 5**,
   Harmony, `net35`, `LangVersion 3`, x86. **[code]**
 - `dotnet build IMVRMod.csproj -c Release` **succeeds** from this repository
   with the five DLLs in `Libs/`: 0 errors, 5 warnings. **[verified]**

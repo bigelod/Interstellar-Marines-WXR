@@ -18,6 +18,8 @@ public static class VRInput
     static bool yHeld = false;
 
     static bool flashlightOn = false;
+    public static bool FlashlightOn { get { return flashlightOn; } }
+    static bool rThumbHeld = false;
 
     static float holdTriggerCooldown = 0f;
 
@@ -104,6 +106,11 @@ public static class VRInput
         }
         rightStickUpHeld = stickUp;
         rightStickDownHeld = stickDown;
+
+        // Right thumbstick click recentres. Play-space position drifts over a long
+        // session and the body ends up away from where the player is standing.
+        if (state.rThumbPress && !rThumbHeld) XRAPI.Recenter();
+        rThumbHeld = state.rThumbPress;
 
         Set("Jump", state.rGrip || rg > 0.7f);
         Set("GamepadJump", state.rGrip || rg > 0.7f);

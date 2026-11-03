@@ -99,7 +99,7 @@ override the wrong way round produces an input that silently does nothing.
 | Silencer | Left trigger double-tap (within 0.35 s) | edge |
 | Fire mode | Left trigger hold > 0.6 s, 1 s cooldown | edge |
 | Menu / mission overview | Left menu | level |
-| **FOV adjust** | **Up / down arrows while paused** | steps `screen_fov` by 10 |
+| **Tuning menu** | **Pause → click "VR Settings"** | clickable overlay, see below |
 
 Mouse and keyboard are blocked during VR gameplay at two levels — the
 `InputManager` entry points and six raw `UnityEngine.Input` methods — but stay
@@ -123,9 +123,25 @@ seconds**, so values can be tuned with the game running.
 | `hudScale` | `0.62` | HUD shrink toward the centre. `1.0` disables the mechanism entirely |
 | `screen_fov` | `104.5` | Angle the runtime paints the frame across. Lower = smaller and more central |
 
-`screen_fov` is also adjustable **inside the headset**: pause, tap up/down. The
-chosen value is written back into `config.txt`, so there is nothing to copy
-down afterwards.
+### In-game tuning menu
+
+**Pause the game and click "VR Settings".** Eye height, eye forward, hand
+height, near clip, HUD scale, screen FOV, turn speed and deadzone each get a
+`-` / value / `+` row. Every change applies immediately and is written back to
+`config.txt`, so nothing needs copying down and nothing is lost on exit.
+
+It is **clickable rather than key-driven** for a specific reason: it only shows
+while paused, and while paused the mod sends `MODE_VR = 0`, which hands screen
+control back to the runtime's own pointer emulation — so the mouse works. An
+earlier arrow-key tuner produced no log output at all in testing, suggesting
+the thumbstick does not emit arrow keys on this setup. The pointer is the
+channel known to work in that state.
+
+It is drawn with IMGUI, straight to the backbuffer after every camera, so it
+cannot disturb the HUD bend pipeline. The panel is confined to the central 62%
+of the frame, which is the region measured as actually visible in the headset.
+
+The arrow-key tuner is still present and harmless, but the menu supersedes it.
 
 ## Diagnostics
 
@@ -174,6 +190,38 @@ edge-anchored widgets move only when their **parent rect** changes. FINDINGS #11
 **The weapon uses body rotation, not head rotation.** Using head rotation looks
 more natural in the code and makes the gun swing whenever you look around —
 the bug `Docs/general_wxr/TIPS.md` cites by name from this project.
+
+**`HelmetOccluder` did not cause the pitch-black screen, and its renderer must
+stay enabled.** A comment in `Patches.cs` claimed it did and told us to hide it;
+on 2 Nov 2026 that was implemented, and the live `hud_tree.txt` immediately
+disproved the claim:
+
+```
+HelmetOccluder layer=14  mat=Invisible_ShadowCaster
+CAM WorldCamera  cullingMask=-123909  (Default,TransparentFX,...)   <- no UIOverlay
+CAM HelmetCamera cullingMask=16384 (UIOverlay) clear=Depth parent=WorldCamera
+```
+
+Layer 14 is `UIOverlay`, drawn **only** by `HelmetCamera`, which draws the HUD
+glass pass. `WorldCamera` cannot see the object at all, so it cannot black out
+the world. Nor can it feed Unity's occlusion culling — it is spawned at runtime,
+and only geometry present at bake time contributes to occlusion data. It is part
+of the helmet/HUD pipeline; disabling it is exactly the tidying this document
+exists to prevent. Its one real reach into the world was shadow casting
+(`Invisible_ShadowCaster` around the head darkens the player's surroundings),
+and that is now switched off specifically. `occluder_scale` exists to let the
+owner try 2x on device, but it scales an invisible mesh in the HUD pass.
+
+**The real cause is Unity's baked occlusion culling**, which concludes the whole
+level is hidden when the camera sits inside static geometry. That is a per-frame
+condition, which is why fixing it from the spawn-time near-clip patch kept
+failing after a respawn. `VRClipGuard.cs`, driven from
+`VRHeadTracker.LateUpdate`, linecasts from the Marine's chest to the final
+camera position each frame (layer mask built by **name**, not index) and while
+that line is blocked it turns occlusion culling off *and* collapses
+`farClipPlane` to `inside_far_clip` (8 m). Frustum culling still runs, so the
+cost of running unculled is bounded to a few metres of surroundings instead of
+the whole level seen through the walls. Both restore when clear.
 
 **`VRRoot` is deliberately not `DontDestroyOnLoad`.** It is recreated per
 level. Parenting the weapon to it instead of the scene root destroys the gun on

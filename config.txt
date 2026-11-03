@@ -7,11 +7,55 @@ flipHands=false
 # Shrinks the screen-anchored HUD (compass + squad info at the top, ammo / TP /
 # health at the bottom) toward the centre of the view so nothing sits in the
 # part of the frame a headset cannot show.
-# Lower = smaller and further in. 0.62 is measured from the target rect.
+# Lower = smaller and further in. 0.60 was found on device on 2 Nov 2026.
 # 1.0 disables the mechanism entirely. Re-read from disk every 2s, so you can
 # tweak this while the game is running.
 # World-space diamond waypoint markers are deliberately NOT affected.
-hudScale=0.62
+hudScale=0.60
+
+# View comfort. All live-reloaded every 2s, so tune them with the game running.
+# eye_height / eye_forward move the VR camera off the helmet's own mount point.
+# Raised from the original 0.08 because the Marine's own body was blocking the
+# camera. hand_height lifts the weapon with the eye so the gun does not stay
+# down by the chest where the body occludes it.
+eye_height=0.16
+eye_forward=0.05
+hand_height=0.05
+
+# Helmet lamp, relative to the VR camera. Above the middle of the view reads as
+# helmet-mounted; below it reads as a torch held at the chest.
+light_height=0.10
+light_forward=0.10
+
+# Near clip plane, metres. Low enough that a holographic sight can be brought
+# right up to the eye without being cut off. Raise it toward 0.18 if distant
+# geometry starts z-fighting.
+near_clip=0.05
+
+# Unity occlusion culling on the player camera, while the camera is in OPEN
+# SPACE. 1 = on, the normal fast path. Leave it at 1.
+# It no longer needs to be turned off to cure the pitch-black screen: that only
+# happens while the camera is inside geometry, and the mod now detects exactly
+# that condition each frame and turns culling off for as long as it lasts.
+occlusion_culling=1
+
+# View distance, metres.
+# far_clip is the normal one. inside_far_clip is what the view distance collapses
+# to while the camera is inside geometry - occlusion culling has to be off there
+# or the level disappears, and a short view distance is what keeps that cheap,
+# because frustum culling still runs and nothing beyond it is drawn at all.
+# Lower inside_far_clip = cheaper, and less of the map visible through the wall
+# you are standing in. Raise it if being inside geometry feels too claustrophobic;
+# lower it if the frame rate dips when you clip into a wall.
+far_clip=80
+inside_far_clip=8
+
+# Scale applied to HelmetOccluder, the invisible shell around the head.
+# 1.0 = untouched. This mesh is on layer 14 (UIOverlay), which only HelmetCamera
+# draws, so it CANNOT affect the world view - it was never the black screen.
+# Its shadow casting is now always off, which is the only way it reached the
+# world. Only takes effect on the next spawn.
+occluder_scale=1.0
 
 # How wide an angle WinlatorXR paints the captured frame across, in degrees.
 # This does NOT have to match the FOV the game renders with (98 vertical).
@@ -19,11 +63,10 @@ hudScale=0.62
 # full render resolution - no black borders, no lost pixels, and the sync pixel
 # stays in the top-left corner. That makes it the cheap way to fit everything
 # inside the part of the panel the headset actually shows.
-# 104.5 is what HWXR and opentrackWXR send and is the long-standing default.
-# Try 80, then 70, then 60 - lower is smaller and more central.
+# 90 is the value found on device on 2 Nov 2026 - confirmed working, and proof
+# that the runtime does consume this field. 104.5 is the HWXR default.
 #
-# ADJUSTABLE IN THE HEADSET: pause the game, then tap up / down (the left
-# thumbstick sends arrow keys in screen mode) to step this by 10. The value is
-# written straight back into this line, so it survives the session.
-# Also re-read from disk every 2s if you prefer to edit it by hand.
-screen_fov=104.5
+# ADJUSTABLE IN THE HEADSET: open any menu or pause, click "VR Settings" in the
+# upper-left of the content area, and use the -/+ buttons. Every setting in this
+# file is in that panel, and every change is written straight back here.
+screen_fov=90

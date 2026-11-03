@@ -7,6 +7,16 @@
     <DebugType>portable</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The SDK globs **/*.cs, which sweeps up anything dropped under Release/ -
+         decompiled game source from dnSpy, packaged build output, test captures.
+         That source is reference material, is gitignored, and must never be
+         compiled into the mod: it does not build (C# 6 syntax), and compiling the
+         game's own code into a redistributable is exactly what the licensing rule
+         in Docs/general_wxr/CLAUDE.md forbids. -->
+    <Compile Remove="Release/**/*.cs" />
+    <Compile Remove="Docs/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="BepInEx">
       <HintPath>Libs/BepInEx.dll</HintPath>
       <Private>False</Private>

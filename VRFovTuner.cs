@@ -53,7 +53,7 @@ public static class VRFovTuner
 
         if (Mathf.Abs(next - cur) < 0.01f) return; // already at the clamp
         XRAPI.SetDeclaredFov(next);
-        Persist(next);
+        VRConfigFile.Set("screen_fov", next.ToString("0.##", CultureInfo.InvariantCulture));
     }
 
     static bool IsPaused()
@@ -61,51 +61,5 @@ public static class VRFovTuner
         try { if (GameManager.IsPaused) return true; } catch { }
         try { if (Time.timeScale == 0f) return true; } catch { }
         return false;
-    }
-
-    static void Persist(float value)
-    {
-        string text = value.ToString("0.##", CultureInfo.InvariantCulture);
-        try { VRManagerLogger.LogInfo("[IMVR] screen_fov -> " + text + " (up/down while paused)"); } catch { }
-
-        string path = VRManager.configPath;
-        if (string.IsNullOrEmpty(path)) return; // in-memory change still applies this session
-
-        try
-        {
-            string[] lines = File.ReadAllLines(path);
-            bool found = false;
-            for (int i = 0; i < lines.Length; i++)
-            {
-                string t = lines[i].Trim();
-                if (t.StartsWith("#") || t.Length == 0) continue;
-                int eq = t.IndexOf('=');
-                if (eq <= 0) continue;
-                string k = t.Substring(0, eq).Trim().ToLower();
-                if (k == "screen_fov" || k == "screenfov" || k == "vr_fov" || k == "fov")
-                {
-                    // Rewrite EVERY match, not just the first. ParseConfig applies each
-                    // line in turn, so the last one wins - leaving a stale duplicate
-                    // behind would let the 2s poll undo what was just set.
-                    lines[i] = "screen_fov=" + text;
-                    found = true;
-                }
-            }
-
-            if (found)
-            {
-                File.WriteAllLines(path, lines);
-            }
-            else
-            {
-                // Key absent entirely - append rather than rewriting the file, so comments
-                // and every other setting are left exactly as the user had them.
-                File.AppendAllText(path, Environment.NewLine + "screen_fov=" + text + Environment.NewLine);
-            }
-        }
-        catch (Exception e)
-        {
-            try { VRManagerLogger.LogWarn("[IMVR] Could not persist screen_fov: " + e.Message); } catch { }
-        }
     }
 }

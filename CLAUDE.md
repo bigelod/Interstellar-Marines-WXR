@@ -20,7 +20,9 @@ Then read, in this order:
 
 ## Hard constraints
 
-- **Unity 4, C# 3 (`LangVersion 3`), .NET 3.5, x86, BepInEx 5 + Harmony.** No
+- **Unity 5.6.7, C# 3 (`LangVersion 3`), .NET 3.5, x86, BepInEx 5 + Harmony.** The
+  engine is Unity **5.6.7** - BepInEx logs it on startup - not Unity 4 as the older
+  docs say. `LangVersion 3` is a project choice, not an engine limit, so: no
   interpolated strings, no `?.`, no `var` outside a method body, no tuples;
   `Path.Combine` takes two arguments.
 - **Roughly half this mod reaches into the game by string-named reflection**,

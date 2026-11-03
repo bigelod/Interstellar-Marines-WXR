@@ -4,7 +4,8 @@ public class VRHeadTracker : MonoBehaviour
     Vector3 baseLocalPos;
     Quaternion baseLocalRot;
     bool hasBase = false;
-    void Awake() { baseLocalPos = transform.localPosition; baseLocalRot = transform.localRotation; hasBase = true; }
+    Camera cam;
+    void Awake() { baseLocalPos = transform.localPosition; baseLocalRot = transform.localRotation; hasBase = true; cam = GetComponent<Camera>(); }
     void Start()
     {
         // NearClip Postfix runs after Awake but before Start in most cases, recapture here
@@ -25,8 +26,14 @@ public class VRHeadTracker : MonoBehaviour
             // Pose arrives already normalised and already in Unity's frame - XRAPI.ToUnity
             // does the RH->LH swap once at ingest. Do not swap it again here.
             Vector3 lean = Vector3.ClampMagnitude(hPos, 0.3f);
-            transform.localPosition = baseLocalPos + lean;
+            // The eye offset is applied HERE, not in the near-clip patch, so config.txt can
+            // be retuned live. baseLocalPos is the helmet's own pristine mount point.
+            Vector3 eye = new Vector3(0f, VRManager.eyeHeight, VRManager.eyeForward);
+            transform.localPosition = baseLocalPos + eye + lean;
             transform.localRotation = baseLocalRot * hRot;
         }
+        // Last, with the camera at its final position for the frame, so the
+        // inside-geometry test is asked about where the eye actually ended up.
+        VRClipGuard.Apply(cam);
     }
 }

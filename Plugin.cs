@@ -31,6 +31,35 @@ public class VRManager : BaseUnityPlugin
     public static float deadzone = 0.2f;
     public static bool flipHands = false;
 
+    // View comfort, all live-tunable. Defaults raised from the original 0.08 because the
+    // 1 Nov test showed the Marine's own body blocking the camera.
+    public static float eyeHeight = 0.16f;   // metres above the helmet's own camera mount
+    public static float eyeForward = 0.05f;  // metres forward, clear of the chest
+    public static float handHeight = 0.05f;  // raises the weapon with the eye
+    // Low enough that a holographic sight can be brought to the eye without being cut
+    // off. The rest of the weapon clipping is acceptable; the sight is not.
+    public static float nearClip = 0.05f;
+    // Helmet lamp placement, relative to the VR camera. Above the middle of the view
+    // reads as helmet-mounted rather than hand-held.
+    public static float lightHeight = 0.10f;
+    public static float lightForward = 0.10f;
+    // Unity's occlusion culling on the player camera, while the camera is in open space.
+    // Leaving it ON is the performance-safe default. VRClipGuard overrides it to off for
+    // as long as the camera is inside geometry, which is the only time it causes the
+    // pitch-black screen - so there is no longer any reason to disable it globally.
+    public static bool occlusionCulling = true;
+    // View distance. farClip is the normal one (80 was hardcoded in the near-clip patch
+    // before it became tunable). insideFarClip is what VRClipGuard collapses it to while
+    // the camera is inside geometry: occlusion culling has to be off there or the world
+    // disappears, and a short view distance is what keeps that affordable - frustum
+    // culling still runs, so nothing beyond it is submitted at all.
+    public static float farClip = 80f;
+    public static float insideFarClip = 8f;
+    // Scale applied to HelmetOccluder. 1.0 = untouched. See the note in Patches.cs: it is
+    // an invisible shadow-caster on layer 14, which only HelmetCamera draws, so this
+    // cannot affect the world view - it is here because the owner asked to try 2x.
+    public static float occluderScale = 1f;
+
     // Resolved once in Awake, then re-read every 2s by PollConfig so values can be
     // tuned with the game running - editing files on a headset is painful enough
     // without a restart per attempt.
@@ -67,6 +96,7 @@ public class VRManager : BaseUnityPlugin
         GameObject runner = new GameObject("IMVR_InputRunner");
         DontDestroyOnLoad(runner);
         runner.AddComponent<VRInputRunner>();
+        runner.AddComponent<VRTuneMenu>();
         
         Logger.LogInfo("[IMVR] Interstellar Marines VR - UDP 7872 loaded, dominant=" + configDominant + " flipHands=" + flipHands.ToString());
     }
@@ -140,6 +170,16 @@ public class VRManager : BaseUnityPlugin
                 // resolution. That is the cheap way to fit everything inside the part of
                 // the panel a headset actually shows - no viewport rect, no black borders,
                 // no lost pixels, and the sync pixel does not move.
+                if(k=="eye_height" || k=="eyeheight"){ float f; if(float.TryParse(v, out f) && f >= -0.5f && f <= 1.0f) eyeHeight = f; }
+                if(k=="eye_forward" || k=="eyeforward"){ float f; if(float.TryParse(v, out f) && f >= -0.5f && f <= 1.0f) eyeForward = f; }
+                if(k=="hand_height" || k=="handheight"){ float f; if(float.TryParse(v, out f) && f >= -0.5f && f <= 1.0f) handHeight = f; }
+                if(k=="light_height" || k=="lightheight"){ float f; if(float.TryParse(v, out f) && f >= -0.5f && f <= 1.0f) lightHeight = f; }
+                if(k=="light_forward" || k=="lightforward"){ float f; if(float.TryParse(v, out f) && f >= -0.5f && f <= 1.0f) lightForward = f; }
+                if(k=="occlusion_culling" || k=="occlusionculling"){ occlusionCulling = !(v=="false" || v=="0" || v=="no"); }
+                if(k=="near_clip" || k=="nearclip"){ float f; if(float.TryParse(v, out f) && f > 0.001f && f <= 1.0f) nearClip = f; }
+                if(k=="far_clip" || k=="farclip"){ float f; if(float.TryParse(v, out f) && f >= 5f && f <= 2000f) farClip = f; }
+                if(k=="inside_far_clip" || k=="insidefarclip"){ float f; if(float.TryParse(v, out f) && f >= 1f && f <= 500f) insideFarClip = f; }
+                if(k=="occluder_scale" || k=="occluderscale"){ float f; if(float.TryParse(v, out f) && f >= 0.1f && f <= 10f) occluderScale = f; }
                 if(k=="screen_fov" || k=="screenfov" || k=="vr_fov" || k=="fov"){
                     float f; if(float.TryParse(v, out f) && f > 1f && f <= 180f) XRAPI.SetDeclaredFov(f);
                 }

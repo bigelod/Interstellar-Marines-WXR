@@ -93,8 +93,42 @@ class Helmet_InitFirstPersonCamera_Patch
                         r.enabled = false;
                     }
                 }
-                // Also hide HelmetOccluder (layer 14, Invisible_ShadowCaster) - it occludes world in VR and makes the black disc worse
+                // HelmetOccluder. An old comment here claimed it caused the black screen
+                // and told us to hide it; on 2 Nov 2026 that was finally implemented, and
+                // the live tree then showed the claim was wrong:
+                //
+                //   HelmetOccluder layer=14 mat=Invisible_ShadowCaster
+                //   WorldCamera cullingMask=-123909   <- UIOverlay (14) NOT included
+                //   HelmetCamera cullingMask=16384 (UIOverlay) clear=Depth
+                //
+                // Layer 14 is drawn only by HelmetCamera, which draws the HUD glass pass.
+                // WorldCamera cannot see this object at all, so it was never what blacked
+                // out the world - that is Unity's baked occlusion culling, now handled per
+                // frame in VRClipGuard. And being runtime-spawned, this mesh cannot
+                // contribute to baked occlusion data either.
+                //
+                // So the renderer stays ON: it is part of the helmet/HUD pipeline and
+                // disabling it is exactly the kind of "tidying" that breaks the visor.
+                // What is worth killing is its one remaining reach into the world - it is
+                // a ShadowCaster shell around the head, which can darken the player's own
+                // surroundings. Shadows off, geometry untouched.
+                //
+                // occluder_scale exists because the owner asked whether making it bigger
+                // helps. Default 1.0 = no change. It scales an invisible mesh, so any
+                // effect will be on the HUD glass pass, not the world view.
                 // Do NOT hide CH_Marine1pHelmetGlass_HUD (layer 14, mat CH_1pHelmet_HUD_NGUI) - that is the neon green HUD surface
+                for (int i=0;i<allR.Length;i++) {
+                    Renderer r2 = allR[i];
+                    if (r2 == null) continue;
+                    if (!r2.gameObject.name.Contains("Occluder")) continue;
+                    r2.enabled = true;
+                    r2.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    r2.receiveShadows = false;
+                    float s = VRManager.occluderScale;
+                    if (s > 0f && s != 1f) r2.transform.localScale = Vector3.one * s;
+                    VRManagerLogger.LogInfo("[IMVR] " + r2.gameObject.name + " shadows off, scale " + s.ToString("F2")
+                        + " (layer " + r2.gameObject.layer + ", renderer kept - WorldCamera never draws layer 14)");
+                }
             }
         } catch { }
         // FIXED7: Glued HUD mesh, not camera anchor. NGUI camera stays at UI root (flicker was from moving it).
@@ -171,9 +205,7 @@ class InputManager_IsInput_Patch
         // but check again here: LocalMarine null OR GameManager.IsPaused OR Cursor visible = menu
         // FIX: Do NOT check Cursor.visible - in Winlator the cursor is ALWAYS visible even in-game, so that check let mouse+keyboard through always.
         // Only allow when actually in a menu: LocalMarine null, paused, or a menu UI is open. In VR gameplay, block everything.
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         string name = ""; if (keyBind != null) name = keyBind.ToString();
         // VR overrides win - if VR stick/button says this input is true, allow it
         bool v; if (VRInput.overridesBool.TryGetValue(name, out v) && v) { __result = true; return false; }
@@ -203,9 +235,7 @@ class InputManager_IsInputDown_Patch
     }
     static bool Prefix(object keyBind, ref bool __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         string name = ""; if (keyBind != null) name = keyBind.ToString();
         bool v; if (VRInput.overridesBool.TryGetValue(name, out v) && v) { __result = true; return false; }
         if (name.Contains("Menu") || name.Contains("Confirm") || name.Contains("Cancel") || name.Contains("Pause") || name.Contains("Back") || name.Contains("Select")) return true;
@@ -260,10 +290,19 @@ class Helmet_VR_NearClip
 
         if (___playerCamera != null)
         {
-            // Only apply once - InitFirstPersonCamera can run multiple times per level, += would drift HUD
-            if (Mathf.Abs(___playerCamera.transform.localPosition.y - 0.08f) > 0.01f) ___playerCamera.transform.localPosition += new Vector3(0f, 0.08f, 0.05f);
-            ___playerCamera.nearClipPlane = 0.18f;
-            ___playerCamera.farClipPlane = 80f;
+            // The eye offset used to be applied here as a one-shot += guarded by comparing
+            // y against 0.08, which could not be retuned and drifted if the guard missed.
+            // VRHeadTracker now owns it (eye_height / eye_forward), so this patch leaves
+            // the camera on the helmet's own mount point and the tracker captures it clean.
+            ___playerCamera.nearClipPlane = VRManager.nearClip;
+            // Occlusion culling and far clip are no longer set here. THE PITCH-BLACK BUG
+            // is Unity's baked occlusion culling deciding the level is hidden when the
+            // camera is inside static geometry, which is a per-frame condition, not a
+            // once-per-spawn one - fixing it from a spawn patch is why it kept coming back
+            // after a respawn. VRClipGuard, driven from VRHeadTracker.LateUpdate, now
+            // owns both: culling off and a collapsed view distance while inside geometry,
+            // full culling and full distance the rest of the time.
+            ___playerCamera.farClipPlane = VRManager.farClip;
             ___playerCamera.fieldOfView = 98f;
             // Log what the camera ACTUALLY renders, so the declared screen_fov can be
             // compared against it. Unity's fieldOfView is vertical; horizontal depends on
@@ -308,18 +347,61 @@ class WeaponLight_VR_Head
         if (localMarine == null || localMarine.Helmet == null) return;
         Camera headCam = Traverse.Create(localMarine.Helmet).Field("playerCamera").GetValue<Camera>();
         if (headCam == null) return;
-        if (___flashLightGO.transform.parent != headCam.transform)
+        // ONE mod-owned lamp on the head, built from this weapon's prefab the first time
+        // we see one. Never reparent the weapon's own lamp - doing that per weapon is what
+        // stacked the brightness on every swap. See VRHeadLamp.cs.
+        VRHeadLamp.Ensure(___flashLightGO, headCam);
+        VRHeadLamp.SetOn(VRInput.FlashlightOn);
+
+        // Every gun's own lamp stays dark forever, drawn or stowed.
+        if (___flashLightGO.activeSelf) ___flashLightGO.SetActive(false);
+
+        if (___lightHitPosition != null)
         {
-            ___flashLightGO.transform.SetParent(headCam.transform, false);
-            ___flashLightGO.transform.localPosition = new Vector3(0f, -0.06f, 0.25f);
-            ___flashLightGO.transform.localRotation = Quaternion.identity;
-            // FIX 4 - Removed light culling of 9/10 here too
+            // lightHitPosition is the BOUNCE LIGHT anchor, not a marker. WeaponLight
+            // raycasts the beam and sets its localPosition to (0, 0, hitDistance), with
+            // flashBounceLightGO parented beneath it, to fake light bouncing off whatever
+            // the torch is pointed at. It therefore has to share the flashlight's frame,
+            // which is now the head - so reparent it, but do NOT pin it to zero: the game
+            // overwrites that every frame anyway, and zeroing it fought the raycast.
+            // The bounce light hangs off lightHitPosition, which WeaponLight keeps moving
+            // to the beam's raycast hit distance. With the gun lamp dark it has nothing to
+            // bounce, and it was the glowing orb in mid-air, so kill its lights outright
+            // rather than only its billboards.
+            HideLightVisuals(___lightHitPosition);
         }
-        if (___lightHitPosition != null && ___lightHitPosition.transform.parent != headCam.transform)
+    }
+
+    static System.Collections.Generic.HashSet<int> visualsHidden = new System.Collections.Generic.HashSet<int>();
+
+    static void HideLightVisuals(GameObject root)
+    {
+        if (root == null) return;
+        int id = root.GetInstanceID();
+        if (visualsHidden.Contains(id)) return;
+        visualsHidden.Add(id);
+        try
         {
-            ___lightHitPosition.transform.SetParent(headCam.transform, false);
-            ___lightHitPosition.transform.localPosition = Vector3.zero;
+            Renderer[] rs = root.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < rs.Length; i++) { if (rs[i] != null) rs[i].enabled = false; }
+
+            Light[] ls = root.GetComponentsInChildren<Light>(true);
+            for (int i = 0; i < ls.Length; i++) { if (ls[i] != null) ls[i].enabled = false; }
+
+            // Halo is an internal Unity type, so it can only be reached by name. It
+            // derives from Behaviour, hence the cast rather than reflection on 'enabled'.
+            Transform[] ts = root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < ts.Length; i++)
+            {
+                if (ts[i] == null) continue;
+                Behaviour halo = ts[i].gameObject.GetComponent("Halo") as Behaviour;
+                if (halo != null) halo.enabled = false;
+                Behaviour flare = ts[i].gameObject.GetComponent("LensFlare") as Behaviour;
+                if (flare != null) flare.enabled = false;
+            }
+            VRManagerLogger.LogInfo("[IMVR] Hid bounce-light visuals on '" + root.name + "' (" + rs.Length + " renderers)");
         }
+        catch { }
     }
 }
 
@@ -366,6 +448,16 @@ public class VRGlassAnchor : MonoBehaviour
     float vrHudScale = 0.62f;
     static float cachedHudScale = 0.62f;
     static float lastConfigCheckTime = 0f;
+
+    // For the in-game tuning menu. Setting the cache directly makes a change visible on
+    // the next frame instead of after the 2s config poll, which matters when someone is
+    // standing in a headset clicking a plus button and waiting to see the HUD move.
+    public static float GetHudScale() { return cachedHudScale; }
+    public static void SetHudScale(float v)
+    {
+        cachedHudScale = Mathf.Clamp(v, 0.1f, 1.5f);
+        lastConfigCheckTime = UnityEngine.Time.realtimeSinceStartup;
+    }
     static float LoadHudScaleFromConfig(float fallback)
     {
         // Re-check file at most every 2s so you can tweak config.txt live without restart
@@ -604,7 +696,7 @@ class GUICompass_VR_HeadYaw_Patch
 }
 
 [HarmonyPatch(typeof(Helmet), "SetRenderMode")]
-class Helmet_VR_NearClip_2 { static void Postfix(Camera ___playerCamera) { if (VRManagerState.inVR && ___playerCamera != null) ___playerCamera.nearClipPlane = 0.18f; } }
+class Helmet_VR_NearClip_2 { static void Postfix(Camera ___playerCamera) { if (VRManagerState.inVR && ___playerCamera != null) { ___playerCamera.nearClipPlane = VRManager.nearClip; } } } // occlusion culling + far clip: VRClipGuard, per frame
 
 [HarmonyPatch]
 class InputManager_IsInput_Debug
@@ -627,9 +719,7 @@ class UnityInput_GetAxis_Block
 {
     static bool Prefix(string axisName, ref float __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         if (axisName == null) return true;
         if (axisName == "Mouse X" || axisName == "Mouse Y" || axisName == "Horizontal" || axisName == "Vertical" || axisName.Contains("Mouse") || axisName.Contains("Look"))
         { __result = 0f; return false; }
@@ -641,9 +731,7 @@ class UnityInput_GetAxisRaw_Block
 {
     static bool Prefix(string axisName, ref float __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         if (axisName == null) return true;
         if (axisName == "Mouse X" || axisName == "Mouse Y" || axisName == "Horizontal" || axisName == "Vertical" || axisName.Contains("Mouse") || axisName.Contains("Look"))
         { __result = 0f; return false; }
@@ -655,9 +743,7 @@ class UnityInput_GetKey_Block
 {
     static bool Prefix(UnityEngine.KeyCode key, ref bool __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         // Block WASD, arrows, space, shift, mouse buttons in VR gameplay - VR overrides handle these via InputManager
         if (key == UnityEngine.KeyCode.W || key == UnityEngine.KeyCode.A || key == UnityEngine.KeyCode.S || key == UnityEngine.KeyCode.D ||
             key == UnityEngine.KeyCode.UpArrow || key == UnityEngine.KeyCode.DownArrow || key == UnityEngine.KeyCode.LeftArrow || key == UnityEngine.KeyCode.RightArrow ||
@@ -672,9 +758,7 @@ class UnityInput_GetKeyDown_Block
 {
     static bool Prefix(UnityEngine.KeyCode key, ref bool __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         if (key == UnityEngine.KeyCode.W || key == UnityEngine.KeyCode.A || key == UnityEngine.KeyCode.S || key == UnityEngine.KeyCode.D ||
             key == UnityEngine.KeyCode.UpArrow || key == UnityEngine.KeyCode.DownArrow || key == UnityEngine.KeyCode.LeftArrow || key == UnityEngine.KeyCode.RightArrow ||
             key == UnityEngine.KeyCode.Space || key == UnityEngine.KeyCode.LeftShift || key == UnityEngine.KeyCode.RightShift ||
@@ -688,9 +772,7 @@ class UnityInput_GetMouseButton_Block
 {
     static bool Prefix(int button, ref bool __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         __result = false; return false;
     }
 }
@@ -699,9 +781,7 @@ class UnityInput_GetMouseButtonDown_Block
 {
     static bool Prefix(int button, ref bool __result)
     {
-        if (!VRManagerState.inVR) return true;
-        if (Marine.LocalMarine == null) return true;
-        try { if (GameManager.IsPaused) return true; } catch { }
+        if (VRInputGate.AllowNative()) return true;
         __result = false; return false;
     }
 }
@@ -714,6 +794,9 @@ public class VRInputRunner : MonoBehaviour
         // Runs before PollConfig would overwrite it - Persist rewrites the file, so the
         // 2s poll reads back the value we just set rather than reverting it.
         try { VRFovTuner.Update(); } catch { }
+        // AA/TAA, ambient occlusion and depth of field never persist in the game's own
+        // video menu, so re-assert them off. Surgical - see VRPostFX.cs.
+        try { VRPostFX.Enforce(); } catch { }
         try { VRInput.UpdateFrame(); }
         catch (Exception e) { VRManagerLogger.LogError("[IMVR] VRInput Update failed: " + e); }
         if (VRManagerState.verboseDebug && Time.frameCount % 60 == 0)

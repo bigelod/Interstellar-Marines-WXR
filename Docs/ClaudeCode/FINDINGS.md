@@ -44,6 +44,45 @@ cleared, so it does).
 
 ---
 
+## 0. `Cursor.visible` pinned `MODE_VR` to 0 and killed the pose stream — FIXED 2026-11-02
+
+**Found in the 1 Nov device logs, which is the first hard evidence of it.
+Numbered 0 because it outranks everything below.**
+
+`UpdateVRModeFromGameState` contained:
+
+```csharp
+if (cursorVisible && !cursorLocked) isPaused = true;
+```
+
+In Winlator **the cursor is always visible**, so that test is permanently true
+and forced `isPaused` every frame, including in gameplay. The log proves it:
+
+```
+Switching to 2D UI mode (MODE_VR=0) - not in-game or paused. isInGame=True isPaused=True
+```
+
+`isInGame=True` **and** `isPaused=True` at the same time, ten times over, each
+flip-flopping back when `Helmet.InitFirstPersonCamera` re-ran and called
+`ForceVRMode()`. And because `MODE_VR = 0` stops the runtime sending any UDP at
+all, the session logged **267 receive timeouts** — the head and hand pose stream
+was dead or stuttering for most of it.
+
+This is the *same* test that was removed from the input patches long ago, for
+exactly this reason — `Docs/MetaAI/BUG-FIXES.md` records it as "Input leak —
+Cursor.visible". This second copy in `XRAPI` was missed, and it has been
+silently degrading tracking ever since.
+
+Fixed by deleting the test, with a comment saying why it must not come back.
+The timeout warning is now throttled to one line per 5s with a count, because
+267 identical lines buried the signal.
+
+**Expect this to change the feel of everything.** Any judgement about tracking,
+FOV or comfort made before this fix was made against an intermittent pose
+stream.
+
+---
+
 ## 2. The sync pixel camera selection is fragile — DEFERRED
 
 **Status: the owner reports the sync pixel working well on device at last
