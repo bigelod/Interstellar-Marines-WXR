@@ -1,17 +1,29 @@
 using UnityEngine;
 
-// When the VR camera ends up inside world geometry - a lean into a wall, a tight
-// corridor, a respawn in a bad spot - Unity's baked occlusion culling concludes the whole
-// level is hidden and culls everything, giving a pitch-black screen.
+// Occlusion culling in this game does not just skip draw calls - it switches the lights off.
 //
-// The blunt fix is to leave occlusion culling off permanently, but in a corridor game
-// that means submitting the geometry behind every wall, all the time, for a problem that
-// only occurs occasionally.
+// ToggleOcclusion (decompiled, Release/dnSpyResults/ToggleOcclusion.cs) hangs off a
+// renderer and does this:
 //
-// So: detect the condition and pay the cost only while it lasts, and bound it by
-// collapsing the view distance at the same time. Inside geometry the player sees a few
-// metres of their surroundings instead of the whole level through the walls - which is
-// both cheaper and reads better than an X-ray view of the map.
+//     private void OnBecameInvisible() {
+//         foreach (Light light in this.unityLights)      light.enabled = false;
+//         foreach (GameObject go in this.occludedGameObjects) go.SetActive(false);
+//     }
+//
+// So when culling hides a room's marker renderer, every light in that room is disabled.
+// The geometry is still drawn - it is simply unlit. THAT is the pitch-black screen, not
+// the world being culled away, and it is why occlusion_culling=0 helped on device and why
+// the darkness survived a respawn: nothing re-enables those lights until the marker
+// renderer becomes visible again.
+//
+// The important consequence: OnBecameInvisible fires for FRUSTUM culling too. Collapsing
+// the far clip plane when the camera is inside geometry - the obvious-looking fix, and
+// what this file did in its first revision - would switch MORE lights off, not fewer.
+// A short view distance is still the right way to buy performance back (see
+// VRManager.farClip), but it has to be a steady global value the player moves through,
+// not something that snaps shut while they are standing in a wall.
+//
+// So this guard only ever turns occlusion culling OFF, never the view distance down.
 public static class VRClipGuard
 {
     static int ignoreMask = 0;
@@ -42,6 +54,20 @@ public static class VRClipGuard
         if (cam == null) return;
         if (!maskReady) BuildMask();
 
+        // Steady, and the same wherever the player is standing - so ToggleOcclusion's
+        // light switching stays something they walk into and out of predictably.
+        cam.farClipPlane = VRManager.farClip;
+        // Fog is derived from the same number, here, so a live far_clip change from the
+        // tuning menu moves the fog wall with it. See VRVisualTweaks.ApplyFog.
+        VRVisualTweaks.ApplyFog();
+
+        // With occlusion_culling=0 there is nothing to guard against, so skip the query.
+        if (!VRManager.occlusionCulling)
+        {
+            cam.useOcclusionCulling = false;
+            return;
+        }
+
         bool inside = false;
         try
         {
@@ -49,34 +75,21 @@ public static class VRClipGuard
             if (m != null)
             {
                 // From inside the body up to the eye. If a wall lies between the two, the
-                // camera has passed through geometry - which is exactly the case that
-                // triggers the cull. Starting at chest height keeps the origin reliably
-                // inside the player and below the head, so a normal standing pose can
-                // never register a hit.
+                // camera has passed through geometry. Starting at chest height keeps the
+                // origin reliably inside the player and below the head, so a normal
+                // standing pose can never register a hit.
                 Vector3 chest = m.transform.position + Vector3.up * 1.0f;
                 inside = Physics.Linecast(chest, cam.transform.position, ignoreMask);
             }
         }
         catch { }
 
-        if (inside)
-        {
-            cam.useOcclusionCulling = false;          // or the world vanishes entirely
-            cam.farClipPlane = VRManager.insideFarClip; // and bound what that costs
-        }
-        else
-        {
-            cam.useOcclusionCulling = VRManager.occlusionCulling;
-            cam.farClipPlane = VRManager.farClip;
-        }
+        cam.useOcclusionCulling = !inside;
 
         if (inside != lastInside)
         {
             lastInside = inside;
-            if (VRManagerState.verboseDebug)
-            {
-                try { VRManagerLogger.LogInfo("[IMVR] Camera inside geometry = " + inside + " (far clip " + cam.farClipPlane + ", occlusion " + cam.useOcclusionCulling + ")"); } catch { }
-            }
+            try { VRManagerLogger.LogInfo("[IMVR] Camera inside geometry = " + inside + " -> occlusion culling " + (inside ? "OFF" : "ON")); } catch { }
         }
     }
 }

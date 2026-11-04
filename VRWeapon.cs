@@ -24,7 +24,9 @@ public class VRWeapon : MonoBehaviour
     void LateUpdate()
     {
         if (rw == null || !rw.IsLocallyControlled) return;
-        int hand = rightDominant ? XRAPI.RIGHT : XRAPI.LEFT;
+        // Read live rather than from rightDominant, so a dominant_hand change in
+        // config.txt moves the buzz to the same hand VRHands is now posing.
+        int hand = VRHands.DominantIndex;
 
         // Ammo went down = a round was spent. A reload or a weapon swap raises the
         // count, so only a decrease counts, and the first frame only primes lastAmmo.
@@ -39,59 +41,12 @@ public class VRWeapon : MonoBehaviour
         }
         catch { }
 
+        // The whole head/body/hand transform chain lives in VRHands now, because the
+        // interaction ray has to come out of exactly the same frame as the gun - see
+        // VRHandInteract.cs. Nothing about the maths changed when it moved.
         Vector3 p;
         Quaternion r;
-        if (!XRAPI.XR_GetControllerPose(hand, out p, out r)) return;
-
-        // Pose arrives already normalised and already in Unity's frame - XRAPI.ToUnity
-        // does the RH->LH swap once at ingest. Do not swap it again here.
-        //
-        // flipHands is NOT a handedness swap - it is a per-device controller
-        // orientation quirk, so it stays here and is still correct to test.
-        // Config only, no handsfix.txt - VRManager.flipHands is the toggle.
-        // Converted pose is upside-down on Quest 3, so:
-        // flipHands=false (Quest 3 default) = apply roll 180 to make it upright
-        // flipHands=true  (Quest 2 / Pico) = leave it upside-down, that is the Quest 2 state
-        // Roll, not yaw - yaw 180 flips aim backwards, roll flips gun upside-down only.
-        if (!VRManager.flipHands) r = r * Quaternion.Euler(0f, 0f, 180f);
-
-        Vector3 headWorld = Vector3.zero;
-        Quaternion bodyRot = Quaternion.identity;
-        bool foundHead = false;
-
-        Camera[] all = Camera.allCameras;
-        if (all != null)
-        {
-            for (int i = 0; i < all.Length; i++)
-            {
-                if (all[i] != null && all[i].GetComponent<VRHeadTracker>() != null)
-                {
-                    headWorld = all[i].transform.position;
-                    foundHead = true;
-                    break;
-                }
-            }
-        }
-        if (!foundHead && VRManagerState.VRRoot != null)
-        {
-            Transform refT = VRManagerState.VRRoot.transform;
-            Vector3 hPos = Vector3.zero; Quaternion hRot = Quaternion.identity;
-            XRAPI.XR_GetHeadPose(out hPos, out hRot);
-            // Already converted at ingest - hPos is the lean directly
-            Vector3 baseHead = refT.position + refT.up * 1.62f;
-            headWorld = baseHead + refT.rotation * hPos;
-        }
-        // FIXED2: Use BODY rotation, not head rotation, for the gun.
-        // p is head-relative (small) - VRRoot.TransformPoint(p) = feet + p = floor, invisible (that's why FIXED gave no hands).
-        // headWorld + headWorldRot * p = correct height but head yaw moves gun (old bug).
-        // headWorld (position only) + bodyRot * p = correct height AND head yaw does NOT move gun.
-        if (VRManagerState.VRRoot != null) bodyRot = VRManagerState.VRRoot.transform.rotation;
-        else if (Marine.LocalMarine != null) bodyRot = Quaternion.Euler(0f, Marine.LocalMarine.transform.eulerAngles.y, 0f);
-
-        // handHeight lifts the weapon with the eye, so raising the camera does not leave
-        // the gun down by the chest where the body occludes it.
-        p = headWorld + bodyRot * (p + new Vector3(0f, VRManager.handHeight, 0f));
-        r = bodyRot * r;
+        if (!VRHands.GetDominantPose(out p, out r)) return;
 
         Transform model = null;
         if (rw.WeaponModel != null) model = rw.WeaponModel.transform;

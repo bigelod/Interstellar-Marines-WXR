@@ -119,8 +119,16 @@ public static class VRInput
 
 
 
-        Set("Use", (state.rA && !aHeld) || aHoldTime > 0.6f);
-        Set("GamepadUse", (state.rA && !aHeld) || aHoldTime > 0.6f);
+        // Use is published as a LEVEL only. The edge is withheld from the game in VR
+        // (InputManager_IsInputDown_Patch) because the game's edge handler raycasts from
+        // Camera.main - the head - and the toggle is performed here instead, off the
+        // dominant hand. The level still has to go through: Marine releases
+        // buttonBeingHeldDown when IsInput(Use) goes false, which is what ends a
+        // press-and-hold panel. See VRHandInteract.cs.
+        bool usePressed = state.rA && !aHeld;
+        Set("Use", usePressed || aHoldTime > 0.6f);
+        Set("GamepadUse", usePressed || aHoldTime > 0.6f);
+        if (usePressed) { try { VRHandInteract.OnUsePressed(); } catch { } }
 
         Set("Reload", state.rB && !bHeld);
         Set("GamepadReload", state.rB && !bHeld);

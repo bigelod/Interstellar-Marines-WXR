@@ -1,6 +1,6 @@
 # CURRENT_FEATURES.md — what IMVRMod does today
 
-Written for the owner and the next contributor, as of **2026-10-30**.
+Written for the owner and the next contributor, as of **2026-11-03**.
 
 This is the "what does it do" reference. The neighbouring files answer
 different questions: [ARCHITECTURE.md](ARCHITECTURE.md) is *how* it works at
@@ -26,7 +26,7 @@ Verification marks, because the distinction has mattered repeatedly:
 | Body yaw composition | **[device]** | The camera is a child of the helmet, which is a child of the Marine, so head yaw adds to body yaw for free |
 | Handedness + normalisation | **[built]** | Converted **once, at ingest** in `XRAPI.ParseString`. Quaternions normalised unconditionally |
 | No head recoil / bob / lurch / exhaustion | **[device]** | Four `RangedWeapon` view-rotation patches and three `Helmet` bob patches, all gated on `inVR` |
-| Near/far clip and FOV | **[device]** | Near `0.18`, far `80`, vertical FOV `98` |
+| Near/far clip and FOV | **[device]** | Near `0.05`, far `45`, vertical FOV `98`. Fog is derived from the far clip, 45%-95% of it, so the view is walled off by murk just before the clip plane instead of having geometry pop through it |
 
 ## Weapon and hands
 
@@ -50,6 +50,41 @@ The visor HUD is the game's identity and the hardest-won part of this mod.
 | Compass follows head yaw | **[built]** | Replaces `GUICompass.UpdateCompass`, which uses body yaw. The 4-argument `UpdateTicks` signature is confirmed **[dnSpy]** |
 | Physical helmet shell hidden | **[device]** | Layer 8 `CH_Marine1pHelmet*` renderers disabled — otherwise it is a black disc in front of the camera |
 | Flashlight beam follows the head | **[built]** | `WeaponLight`'s light is reparented to the head camera |
+| HUD rendered at 2x | **[built]** | `hud_supersample` writes `HUDCamera.hudScale`, which is a **supersample factor**, not a size: the game sizes both HUD render targets at `Screen * hudScale` and divides the canvas scaler's reference resolution by the same number. Same fit, twice the pixels per glyph |
+| Interaction ray comes off the hand | **[built]** | Brackets, hint text and the Use action all raycast from the dominant hand rather than `Camera.main`. See "Interaction" below |
+
+## Interaction
+
+Both halves of the game's interaction read `Camera.main` — the head:
+
+- `Marine.ProcessInput` raycasts from `Camera.main` over `pushButtonRange` against
+  `ButtonLayerMask` and calls `UseButton.Toggle` / `ToggleRoot`. It is **inlined** in a
+  very large method, so there is no method to patch.
+- `GUIInteracter.UpdateRaycast` runs the same ray, plus a 0.25 m `SphereCastAll`
+  fallback, to drive the brackets and the `[E]` hint.
+
+In flat play the crosshair *is* the head, so one ray serves both. In VR, reaching for a
+wall panel while watching the corridor is the normal thing to do, so the ray comes off
+the dominant hand instead.
+
+| Piece | State | Notes |
+|---|---|---|
+| Hand ray | **[built]** | `VRHands.GetDominantPose` — the same frame the weapon model is placed in, so the ray leaves the muzzle |
+| Brackets and hint | **[built]** | `GUIInteracter.UpdateRaycast` replaced. Calls the game's own private `GetUseButton`, so door-power and team-mate rules are unchanged |
+| The Use action | **[built]** | The Use **edge** is withheld from the game in VR (`InputManager_IsInputDown_Patch`) and `VRHandInteract.OnUsePressed` performs the toggle, replicating `ProcessInput`'s branch exactly |
+| Press-and-hold panels | **[built]** | The Use **level** still goes through untouched — `Marine` clears `buttonBeingHeldDown` when `IsInput(Use)` goes false, and that is what releases a held panel |
+| Fallback | **[built]** | No hand pose (no packets, no VR frame) falls back to the head camera, so interaction never becomes unreachable |
+
+## Shadows and lights
+
+Only the player's helmet lamp casts shadows. `VRLightTamer` sweeps every `Light` in the
+scene every 2 s and sets `shadows = None` on all of them except the ones under
+`VRHeadLamp.LampRoot`, which get `Hard`.
+
+It is a sweep rather than a patch because lights are spawned by the level, by prefabs,
+by weapon fire and by `ToggleOcclusion` turning rooms back on, with no common entry
+point. It writes **only** `Light.shadows` — never `Light.enabled`, which is
+`ToggleOcclusion`'s business and where the pitch-black screen comes from.
 
 ## Haptics
 
@@ -74,7 +109,7 @@ game refused produces no phantom kick.
 | `MODE_VR = 1` in gameplay | **[device]** | Immersive VR |
 | `MODE_VR = 0` in menus and pause | **[device]** | **Deliberate** — see "Things that look wrong but are not" |
 | `MODE_3D = 0` (mono) | **[device]** | Monocular 6DOF is the goal of this port, not a fallback |
-| Red sync pixel | **[device]** | 150 px square, top-left, red channel carries the frame id, green stays 0 |
+| Red sync pixel | **[device]** | **10 px** square, top-left, red channel carries the frame id, green stays 0. It was 150 px until 3 Nov, which worked and was also plainly visible to the player; `sync_pixel_size` can raise it again |
 | `screen_fov` | **[built]** | How wide an angle the runtime paints the frame across. Does **not** have to match the rendered FOV — declaring less shows the same scene, shrunk toward the centre, at full resolution |
 
 ## Controls
@@ -90,7 +125,7 @@ override the wrong way round produces an input that silently does nothing.
 | Weapon switch | Right stick Y up/down, cycles Slot01→02→03, 0.35 s cooldown | edge, on the switch frame only |
 | Fire | Right trigger | level |
 | Jump | Right grip | level |
-| Use / interact | Right A | edge, then level after a 0.6 s hold |
+| Use / interact | Right A | **level only** — the edge is withheld and the mod performs the toggle itself, off the hand ray |
 | Reload | Right B | edge |
 | Crouch | Left grip (hold) | level → hold-to-crouch via `Toggler` |
 | Sprint | Left thumb click | level |
@@ -122,6 +157,12 @@ seconds**, so values can be tuned with the game running.
 | `flipHands` | `false` | `true` for Quest 2 / Pico controller orientation |
 | `hudScale` | `0.62` | HUD shrink toward the centre. `1.0` disables the mechanism entirely |
 | `screen_fov` | `104.5` | Angle the runtime paints the frame across. Lower = smaller and more central |
+| `render_width` / `render_height` | `1280` / `960` | Render resolution, applied once at startup. `0` leaves the window alone |
+| `hud_supersample` | `2.0` | HUD render-target supersampling. Same fit, more pixels. First thing to wind back if frames are short |
+| `far_clip` | `45` | View distance. The fog follows it |
+| `occlusion_culling` | `1` | Back on as of 3 Nov. `VRClipGuard` still forces it off while the camera is inside geometry |
+| `shadow_distance` / `shadow_resolution` | `15` / `0` | Govern the helmet lamp, which is the only light in the level that casts shadows at all |
+| `sync_pixel_size` | `10` | Edge length of the red patch, in framebuffer pixels |
 
 ### In-game tuning menu
 
@@ -212,16 +253,83 @@ exists to prevent. Its one real reach into the world was shadow casting
 and that is now switched off specifically. `occluder_scale` exists to let the
 owner try 2x on device, but it scales an invisible mesh in the HUD pass.
 
-**The real cause is Unity's baked occlusion culling**, which concludes the whole
-level is hidden when the camera sits inside static geometry. That is a per-frame
-condition, which is why fixing it from the spawn-time near-clip patch kept
-failing after a respawn. `VRClipGuard.cs`, driven from
-`VRHeadTracker.LateUpdate`, linecasts from the Marine's chest to the final
-camera position each frame (layer mask built by **name**, not index) and while
-that line is blocked it turns occlusion culling off *and* collapses
-`farClipPlane` to `inside_far_clip` (8 m). Frustum culling still runs, so the
-cost of running unculled is bounded to a few metres of surroundings instead of
-the whole level seen through the walls. Both restore when clear.
+**Occlusion culling in this game switches the lights off, and that is the
+blackout.** `ToggleOcclusion` (`Release/dnSpyResults/ToggleOcclusion.cs`) hangs
+off a renderer and does this:
+
+```csharp
+private void OnBecameInvisible() {
+    foreach (Light light in this.unityLights)           light.enabled = false;
+    foreach (GameObject go in this.occludedGameObjects) go.SetActive(false);
+}
+```
+
+When culling hides a room's marker renderer, every light in that room is
+disabled. The geometry is still being drawn — it is simply unlit. That explains
+what culling-everything never did: why `occlusion_culling=0` cured it on device,
+and why the darkness **survived a respawn**, since nothing re-enables those
+lights until the marker renderer becomes visible again.
+
+`occlusion_culling` was therefore defaulted to **0** on 3 Nov, with `far_clip`
+lowered to 60 to pay for it. On 3 Nov the owner confirmed on device that **1
+behaves**, so it is back on — culling is what skips the draw calls, and 0 costs
+frames rather than saving them. `VRClipGuard.cs` is now load-bearing rather than
+a safety net: driven from `VRHeadTracker.LateUpdate`, it linecasts from the
+Marine's chest to the final camera position each frame (layer mask built by
+**name**, not index) and forces culling off while that line is blocked, which is
+the only time culling can strand the player in the dark.
+
+`far_clip` is **45** independently of that — this is a horror game and the threats
+are close. The fog is tied to it (`VRVisualTweaks.ApplyFog`, reapplied from
+`VRClipGuard` so a live `far_clip` change moves the fog with it) and runs
+45%–95% of the distance, so geometry is fully fogged before it reaches the clip
+plane. The previous fixed 25–75 m range *ended beyond* a 45 m clip, which meant
+the fade never finished and everything popped in at full contrast.
+
+**Do not collapse the far clip to "bound the cost" of running unculled.** That
+was this file's first answer and it is backwards: `OnBecameInvisible` fires for
+**frustum** culling too, so a far clip that snaps shut switches *more* lights
+off, not fewer. A low steady `far_clip` is fine — the player walks through it
+predictably — but it must not be modulated per frame.
+
+**The red damage flash is an IMGUI-per-camera bug, not a shader problem.**
+`MarineController.OnGameUI` (`MarineController.cs:690`) draws the took-damage
+flash as one full-screen `GUI.Box` tinted `tookDamageOverlayColor`, alpha
+`0.25`. IMGUI is not camera-bound: Unity runs the GUI pass **once per camera**,
+and the 2 Nov dump lists seven enabled cameras. Seven coats of 0.25 is
+`1 − 0.75⁷ ≈ 0.87` — very nearly opaque. On a monitor that reads as "the screen
+went red"; filling a headset's whole field of view it reads as the lights going
+out.
+
+In VR the sheet is therefore clamped to **alpha 0** — suppressed outright, rather
+than patching `OnGameUI`, which also draws the respawn prompt and spawn
+countdown — and replaced with two red bands in peripheral vision, the approach
+proven in Shogo-VR (commit `ab012bc`). They differ from the Shogo version in
+four ways: mono rather than one band per eye; alpha-blended, since Shogo's were
+opaque only because that 2D API had no alpha; width *and* opacity scale with the
+fade; and they are positioned against the **visible area** (`pain_bar_inset`,
+keep in step with `hudScale`) rather than the framebuffer, because bands at the
+true screen edge would be outside the player's view entirely.
+
+Critically, they are drawn from the mod's own overlay camera in
+`SyncPixelQuad.OnPostRender` — the one place in the build that runs **exactly
+once per frame**, which is the specific thing the game's IMGUI flash got wrong.
+They are painted *before* the sync pixel, and that ordering is now load-bearing:
+`pain_bar_inset` **defaults to 1.0** as of 3 Nov, confirmed on device — the panel
+is wider than it is tall, so the vertical crop is the binding one and the full
+frame width is in view — which puts the left band's edge on `x = 0`, exactly over
+the corner the runtime reads the frame id from.
+
+**The sync pixel must not ride a game camera.** It used to be a component added
+to the highest-depth camera with its quad parented to that camera's transform.
+On 2 Nov that camera was `PostBloomEffect`, whose parent is `MainMenu(Clone)` —
+so a respawn destroyed it, and a never-reset `static bool alreadyCreated` meant
+nothing ever rebuilt it. It now owns a `DontDestroyOnLoad` GameObject with its
+own `Camera` (depth 1000, `clearFlags = Nothing`, `cullingMask = 0`) purely to
+get an `OnPostRender` after every game camera, and paints the patch in screen
+space with immediate-mode `GL` — no texture sampling, no blending, no filtering,
+which is what the XrApi spec requires since any blend corrupts the value the
+runtime reads back.
 
 **`VRRoot` is deliberately not `DontDestroyOnLoad`.** It is recreated per
 level. Parenting the weapon to it instead of the scene root destroys the gun on

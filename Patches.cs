@@ -12,24 +12,52 @@ using UnityEngine;
 
 public static class VRVisualTweaks
 {
+    // Fog start and end as fractions of the far clip plane. The end sits just short of the
+    // clip so geometry is already fully fogged by the time it would otherwise vanish -
+    // which is the whole point of a short far_clip in a horror game: the view should be
+    // walled off by murk, not by a hard edge things pop through.
+    const float FOG_START_FRAC = 0.45f;
+    const float FOG_END_FRAC = 0.95f;
+
     public static void ApplyGlobal()
     {
         try
         {
             QualitySettings.shadowCascades = 0;
-            QualitySettings.shadowDistance = 15f;
+            QualitySettings.shadowDistance = VRManager.shadowDistance;
+            // Shadow map size. Only one light casts shadows at all (VRLightTamer), so the
+            // saving here is small in absolute terms - but it is the player's own helmet
+            // lamp, which is on screen constantly and re-renders its map every frame.
+            QualitySettings.shadowResolution = ResolutionFor(VRManager.shadowResolution);
             QualitySettings.vSyncCount = 0;
             QualitySettings.antiAliasing = 0;
             QualitySettings.pixelLightCount = 1;
             QualitySettings.shadowProjection = ShadowProjection.CloseFit;
         }
         catch { }
+        ApplyFog();
+    }
+
+    static ShadowResolution ResolutionFor(int level)
+    {
+        if (level <= 0) return ShadowResolution.Low;
+        if (level == 1) return ShadowResolution.Medium;
+        if (level == 2) return ShadowResolution.High;
+        return ShadowResolution.VeryHigh;
+    }
+
+    // Called every frame from VRClipGuard, which is where far_clip is applied, so the two
+    // can never drift apart - the previous fixed 25/75 range ended BEYOND a 45 m far clip,
+    // which meant the fog never finished and everything popped in at full contrast.
+    public static void ApplyFog()
+    {
         try
         {
+            float far = VRManager.farClip;
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogStartDistance = 25f;
-            RenderSettings.fogEndDistance = 75f;
+            RenderSettings.fogStartDistance = far * FOG_START_FRAC;
+            RenderSettings.fogEndDistance = far * FOG_END_FRAC;
             RenderSettings.fogDensity = 0.015f;
             RenderSettings.fogColor = new Color(0.08f, 0.1f, 0.12f);
         }
@@ -71,10 +99,14 @@ class Helmet_InitFirstPersonCamera_Patch
         {
             cam.gameObject.AddComponent<VRHeadTracker>();
         }
-        if (cam != null && cam.GetComponent<SyncPixelQuad>() == null)
-        {
-            cam.gameObject.AddComponent<SyncPixelQuad>();
-        }
+        // The sync pixel is NOT attached to a game camera any more. It used to ride the
+        // highest-depth camera, which on 2 Nov was PostBloomEffect - a child of
+        // MainMenu(Clone) - so a respawn destroyed it, and a never-reset static flag meant
+        // nothing rebuilt it. It owns its own DontDestroyOnLoad camera now, created once
+        // in Plugin.Awake. See SyncPixelQuad.cs.
+        SyncPixelQuad.Ensure();
+        // The MarineController is new on every spawn, so re-find it for the pain clamp.
+        VRPainOverlay.Forget();
         // GRAPHICAL ONLY - NOT TRACKING: Hide the opaque 1p helmet mesh that sits below the VR camera.
         // Dump: CH_Marine1pHelmet (layer 8) + CH_Marine1pHelmetGlass (layer 8) are children of Helmet -> Root -> Helmet, NOT of WorldCamera.
         // WorldCamera (VR camera) is at (0.1,0.2,-0.2) above helmet center, so in VR you see the helmet mesh as a huge black disc on the left / below you (second screenshot).
@@ -237,6 +269,13 @@ class InputManager_IsInputDown_Patch
     {
         if (VRInputGate.AllowNative()) return true;
         string name = ""; if (keyBind != null) name = keyBind.ToString();
+        // The Use EDGE is withheld in VR, deliberately. Marine.ProcessInput handles it by
+        // raycasting from Camera.main - the head - which in VR is wherever the player
+        // happens to be looking rather than where they are reaching. VRHandInteract does
+        // the toggle off the dominant hand instead, and it is driven straight from the
+        // controller in VRInput, so nothing is lost by refusing the edge here.
+        // IsInput (the level) is NOT blocked: that is what releases a held-down panel.
+        if (VRManagerState.inVR && (name == "Use" || name == "GamepadUse")) { __result = false; return false; }
         bool v; if (VRInput.overridesBool.TryGetValue(name, out v) && v) { __result = true; return false; }
         if (name.Contains("Menu") || name.Contains("Confirm") || name.Contains("Cancel") || name.Contains("Pause") || name.Contains("Back") || name.Contains("Select")) return true;
         if (name.Contains("Move") || name.Contains("Strafe") || name.Contains("Turn") || name.Contains("Look") || name.Contains("Fire") || name.Contains("Aim") || name.Contains("Mouse") || name.Contains("Forward") || name.Contains("Backward") || name.Contains("Left") || name.Contains("Right") || name.Contains("Jump") || name.Contains("Crouch") || name.Contains("Sprint") || name.Contains("Reload") || name.Contains("Use"))
@@ -287,6 +326,11 @@ class Helmet_VR_NearClip
     {
         if (!VRManagerState.inVR) return;
         VRVisualTweaks.ApplyGlobal();
+        // Re-asserted per spawn because the game applies its own saved resolution during
+        // startup, which may well be after the plugin's Awake. It is a no-op whenever the
+        // window already matches, so this costs nothing in the normal case and does not
+        // reallocate anything on a respawn. render_width=0 opts out entirely.
+        VRManager.ApplyRenderResolution();
 
         if (___playerCamera != null)
         {
@@ -412,21 +456,31 @@ class HUDCamera_VR_Shrink_Patch
     // HUDCamera (culling 1568 = UI,Debris,Precipitation, target CleanToBlendTarget) blends NGUI UI via doubleGlassMaterial onto the visor.
     // Setting glassIntensity=0, glassTexture=null, and clear=transparent (old code) killed that blend -> HUD completely missing (dump: glassIntensity=0, lastImage active but empty).
     // So: ONLY set hudScale and distort (safe for VR). Never touch glass, cullingMask, or clearFlags.
+    // HUDCamera.hudScale is a SUPERSAMPLE factor, not a screen-size one. HUDCamera.Update
+    // sizes both render targets at Screen * hudScale and divides mainCanvasScaler's
+    // 3840x2160 reference resolution by the same number, so the HUD lands in the same place
+    // at the same apparent size with proportionally more pixels behind it. This patch used
+    // to pin it to 1.0 - a leftover from FIXED13, where 0.6 made the text blurry - which was
+    // actually below the game's own 1.1 default and is why the text read as low-res in the
+    // headset. It now follows hud_supersample, and is re-applied on change rather than once,
+    // so the tuning menu can move it live.
     static System.Collections.Generic.HashSet<int> fixedInstances = new System.Collections.Generic.HashSet<int>();
     static void Postfix(HUDCamera __instance)
     {
         if (!VRManagerState.inVR) return;
         int id = __instance.GetInstanceID();
+        float want = Mathf.Clamp(VRManager.hudSupersample, 0.5f, 4f);
         if (!fixedInstances.Contains(id))
         {
-            __instance.hudScale = 1.0f;
             __instance.distortIntensityX = 0f;
             __instance.distortIntensityY = 0f;
-            try { Traverse.Create(__instance).Field("lastHudScale").SetValue(1.0f); } catch { }
             // DO NOT set glassIntensity / glassOffset / glassTexture - doubleGlass needs them to show HUD
             // DO NOT set myCamera.cullingMask or clearFlags - original 1568 and Color clear are correct for the blend pipeline
             fixedInstances.Add(id);
         }
+        // Only on a real change: assigning it is free, but HUDCamera.Update reallocates
+        // two render targets whenever the value differs from lastHudScale.
+        if (Mathf.Abs(__instance.hudScale - want) > 0.0001f) __instance.hudScale = want;
     }
 }
 
@@ -598,8 +652,15 @@ public class VRGlassAnchor : MonoBehaviour
             try {
                 if (HUDCamera.Instance != null) {
                     var hcType = HUDCamera.Instance.GetType();
+                    // hudScale is the HUD's supersample factor - see HUDCamera_VR_Shrink_Patch.
+                    // This line used to force 1f every frame, which fought that patch and
+                    // capped the HUD's resolution below the game's own 1.1 default.
                     var hs = hcType.GetField("hudScale", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
-                    if (hs != null) hs.SetValue(HUDCamera.Instance, 1f);
+                    if (hs != null) {
+                        float wantSS = Mathf.Clamp(VRManager.hudSupersample, 0.5f, 4f);
+                        object cur = hs.GetValue(HUDCamera.Instance);
+                        if (!(cur is float) || Mathf.Abs((float)cur - wantSS) > 0.0001f) hs.SetValue(HUDCamera.Instance, wantSS);
+                    }
                     // FIXED14: UV tiling also did nothing - shader ignores mainTextureScale or resets it. Revert UV.
                     var dg = hcType.GetField("doubleGlassMaterial", System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
                     if (dg != null) {
@@ -797,6 +858,13 @@ public class VRInputRunner : MonoBehaviour
         // AA/TAA, ambient occlusion and depth of field never persist in the game's own
         // video menu, so re-assert them off. Surgical - see VRPostFX.cs.
         try { VRPostFX.Enforce(); } catch { }
+        // Shadow casting is reserved for the player's helmet lamp. Lights spawn from the
+        // level, from prefabs and from weapon fire, so this is a periodic sweep rather
+        // than a patch. VRLightTamer.cs.
+        try { VRLightTamer.Enforce(); } catch { }
+        // Clamp the took-damage flash. Its alpha is multiplied once per camera by IMGUI,
+        // which is what turns a 0.25 red tint into a near-opaque blackout. VRPainOverlay.cs.
+        try { VRPainOverlay.Enforce(); } catch { }
         try { VRInput.UpdateFrame(); }
         catch (Exception e) { VRManagerLogger.LogError("[IMVR] VRInput Update failed: " + e); }
         if (VRManagerState.verboseDebug && Time.frameCount % 60 == 0)

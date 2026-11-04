@@ -1,0 +1,15 @@
+<Project>
+  <!-- Release unless something explicitly asks for Debug.
+
+       The owner's deploy shortcut points at bin/Release/net35, and a Quest 3 running
+       this through a translation layer has nothing spare for an unoptimised build - so
+       a bare `dotnet build` must not quietly produce one and leave a stale Release DLL
+       sitting in the deploy folder. This file is imported by Microsoft.Common.props
+       BEFORE the SDK defaults Configuration to Debug, which is why the default cannot
+       be set in IMVRMod.csproj itself.
+
+       `dotnet build -c Debug` still works and still goes to bin/Debug. -->
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+  </PropertyGroup>
+</Project>

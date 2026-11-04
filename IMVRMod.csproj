@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- The default Configuration is forced to Release in Directory.Build.props,
+         which is imported early enough to beat the SDK's own Debug default. -->
     <TargetFramework>net35</TargetFramework>
     <AssemblyName>IMVRMod</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

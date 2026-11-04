@@ -78,4 +78,8 @@ public static class VRHeadLamp
     }
 
     public static bool Exists() { return lamp != null; }
+
+    // For VRLightTamer, which silences the shadows of every light in the level EXCEPT
+    // the ones under this object.
+    public static GameObject LampRoot { get { return lamp; } }
 }

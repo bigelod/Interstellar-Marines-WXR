@@ -1,10 +1,26 @@
-# STATUS.md — where the port stands, 2026-10-30
+# STATUS.md — where the port stands
 
-Assessed by reading every source file and checking the reflective calls against
-the shipped game assemblies. **Nothing below has been confirmed on a headset.**
+Originally assessed 2026-10-30 by reading every source file and checking the
+reflective calls against the shipped game assemblies. **Last updated 2026-11-03,
+after three rounds of device testing on a Quest 3.**
 
-> **Changes made the same day, after the owner reviewed this audit.** All build
-> clean, none are device-tested:
+The original audit's header said nothing in it had been confirmed on a headset.
+That is no longer true, and the device tests have been more informative than the
+code reading was — see [What the device tests settled](#what-the-device-tests-settled).
+
+## Confirmed on device
+
+| Setting | Value | When |
+|---|---|---|
+| `hudScale` | **0.60** | 2 Nov 2026 |
+| `screen_fov` | **90** (vs 98 rendered) — proves the runtime consumes the field | 2 Nov 2026 |
+| `occlusion_culling` | **0** cured the blackouts; **1 is fine** once they were fixed at source, so it is back on | 3 Nov 2026 |
+| Black screens | **Gone**, and respawn is clean | 3 Nov 2026 |
+| `pain_bar_inset` | **1.00** — the panel is wider than it is tall, so the full frame width is in view | 3 Nov 2026 |
+| Sync pixel at 150 px | Read correctly, and was a large red square in the player's view. Now **10 px**, per spec | 3 Nov 2026 |
+
+> **Changes made on 2026-10-30, after the owner reviewed the original audit.**
+> All build clean, none were device-tested at the time:
 >
 > - **Handedness and normalisation moved to ingest** (FINDINGS #6) — one
 >   conversion in `XRAPI.ParseString`, per-use copies deleted.
@@ -15,28 +31,37 @@ the shipped game assemblies. **Nothing below has been confirmed on a headset.**
 >   deliberate; the general docs were the thing that was wrong, and have been
 >   corrected in `Docs/general_wxr/`.
 > - **FINDINGS #2 and #3 deferred** — the owner reports the sync pixel working
->   on device and is re-checking next test.
+>   on device and is re-checking next test. *(Superseded 3 Nov: #3 was confirmed
+>   on device and is now fixed — see below.)*
 >
 > - **HUD scaling reconnected** (FINDINGS #11) — the HUD is confirmed visible in
 >   gameplay, so FIXED29 holds. `VRHudSafeArea` now shrinks the screen-anchored
 >   HUD toward the centre; the previous attempts failed because the HUD is uGUI,
 >   not NGUI as `Docs/MetaAI/` says.
 
-Branch `main`, last commit `a514f71` "Beta prep". Two files have uncommitted
-changes: `Patches.cs` (FIXED29 — reverts `HUD UI Root` scaling to 1.0) and
-`VRWeapon.cs` (FIXED2/3 — body rotation instead of head rotation, detach to
-scene root). Both of those are the *newer* and better versions of that code, so
-the working tree is ahead of the last commit in substance.
+Branch `main`, last commit `e648e72` "ReadMe updated". **Nothing since has been
+committed.** The working tree is well ahead of the last commit in substance: it
+carries every device-driven fix from the 1–3 Nov tests plus nine new source
+files (`VRClipGuard.cs`, `VRConfigFile.cs`, `VRHeadLamp.cs`, `VRHudSafeArea.cs`,
+`VRInputGate.cs`, `VRPainOverlay.cs`, `VRPostFX.cs`, `VRTuneMenu.cs`,
+`VRFovTuner.cs`), all untracked.
 
 `Docs/` itself is untracked — this doc set and the two sets it sits beside are
 not yet committed.
 
 ## Build
 
-`dotnet build IMVRMod.csproj -c Release` → **0 errors, 5 warnings**, with the
-five DLLs present in `Libs/`. Two of the warnings point at real findings
-(`targetFovX` / `targetFovY` unused, see FINDINGS #7; unreachable code, see
-FINDINGS #12).
+`dotnet build` → **0 errors, 3 warnings**, with the five DLLs present in
+`Libs/`. The remaining warnings are cosmetic (one unreachable statement, one
+unused `catch` variable, one write-only field). The two that pointed at real
+findings are gone: `targetFovX` / `targetFovY` are now consumed via `screen_fov`
+(#7).
+
+The csproj carries `<Compile Remove="Release/**/*.cs" />` and the same for
+`Docs/`. This is **load-bearing**: the decompiled game source lives in
+`Release/dnSpyResults/`, and the .NET SDK globs `**/*.cs` by default, so without
+those lines the build both breaks and would compile game code into the
+redistributable.
 
 ## Subsystem status
 
@@ -46,8 +71,11 @@ FINDINGS #12).
 | XrApi handshake | **Partial** | Writes `version` only if absent; no `vr` file; never reads `system`, so no headset detection (FINDINGS #12) |
 | XrApi outbound | **All six fields real** | Haptics wired (#4); FOV now config-driven via `screen_fov` and formatted invariantly (#7) |
 | Presentation mode switching | **Correct as written** | `MODE_VR = 0` for menus is deliberate — it stops the unused pose stream, restores runtime mouse control and drops out of immersive presentation (#1, withdrawn) |
-| Sync pixel | **Owner reports working; two code smells deferred** | Camera selection can pick a render-target camera (#2); a never-reset static should lose it after a level change (#3). Both deferred pending the next device test |
-| Window / borderless | **Not implemented** | No code touches the window at all (#5) |
+| Sync pixel | **Rewritten 3 Nov** | #3 confirmed on device — it died on respawn. It rode the highest-depth camera (`PostBloomEffect`, a child of `MainMenu(Clone)`) and `static bool alreadyCreated` was never reset, so nothing rebuilt it. Now owns a `DontDestroyOnLoad` camera (depth 1000, clears nothing, `cullingMask = 0`) and paints via immediate-mode `GL`. #2 is moot — it no longer selects a camera at all |
+| Window / borderless | **Partial** | Still no borderless enforcement, but `render_width` / `render_height` now apply a resolution once at startup (default 1280x960). The rest of #5 stands |
+| Interaction ray | **Rewritten 3 Nov, untested** | Brackets, hint and the Use action all come off the dominant hand. `GUIInteracter.UpdateRaycast` is replaced; the Use **edge** is withheld and `VRHandInteract` performs the toggle, because the action itself is inlined in `Marine.ProcessInput` and cannot be patched as a method |
+| Shadows | **Rewritten 3 Nov, untested** | Only the helmet lamp casts them (`VRLightTamer`); `shadow_resolution` defaults to Low |
+| HUD text resolution | **Rewritten 3 Nov, untested** | `HUDCamera.hudScale` is a supersample factor, and the mod was pinning it to 1.0 — *below* the game's own 1.1 default. Now follows `hud_supersample`, default 2.0 |
 | 6DOF head tracking | **Working** | Lean clamped to 0.30 m; yaw composes through the helmet parent. Handedness fixed at ingest (#6) — re-verify with head tilted sideways while looking up |
 | Weapon / hands pose | **Working, unconfirmed on device** | Third iteration; head position for height, body rotation for orientation — the fix for the hands-swing-with-head bug `general_wxr/TIPS.md` names from this project. `Docs/MetaAI/CURRENT-PROGRESS.md` still lists it as unconfirmed |
 | Haptics | **Implemented, untested** | Dominant hand, decayed per frame: 6 frames when `GetAmmoCount()` drops, 10 frames on a weapon switch (#4) |
@@ -55,11 +83,15 @@ FINDINGS #12).
 | Mouse / keyboard blocking | **Mostly working** | Both `InputManager` entry points plus six raw `UnityEngine.Input` methods. `IsInputUp` is unpatched (#8) |
 | Helmet shell hiding | **Working** | Layer 8 `CH_Marine1pHelmet*` renderers disabled; `Glass_HUD` deliberately spared |
 | HUD glue to VR head | **Working** | `VRGlassAnchor` reparents the glass mesh per frame, preserving the Animator pose; restores it when the visor opens |
-| HUD scaling | **Mechanism exists, untested** | `VRHudSafeArea` gives the canvas content a smaller parent rect, which is the one approach that moves edge-anchored widgets. `hudScale` drives it; default 0.62 (#11) |
+| HUD scaling | **Working, confirmed on device** | `VRHudSafeArea` gives the canvas content a smaller parent rect, which is the one approach that moves edge-anchored widgets. `hudScale` drives it; **0.60 confirmed 2 Nov** (#11) |
+| Occlusion culling / view distance | **Root cause found 3 Nov** | The blackout was never culled geometry — `ToggleOcclusion.OnBecameInvisible` *disables every light* in a room that culls out. `occlusion_culling` now defaults to **0**; `far_clip` lowered 80 → 60 to pay for it. `VRClipGuard` is the safety net if culling is turned back on |
+| Damage feedback | **Replaced for VR, 3 Nov** | The game's full-screen flash is one IMGUI `GUI.Box` at alpha 0.25, and IMGUI runs once per *camera* — seven of them, so ≈ 0.87 opacity. Suppressed to alpha 0 and replaced with two peripheral red bands, per Shogo-VR `ab012bc`. Drawn from the mod's overlay camera, exactly once per frame |
+| In-headset tuning | **Working, confirmed on device** | `VRTuneMenu` IMGUI panel, shown in menus or when paused. Every config key has a row; `VRConfigFile` writes each change straight back to `config.txt`, which is required because `PollConfig` would otherwise revert it within 2s |
+| Helmet lamp | **Reworked 3 Nov** | One mod-owned copy parented to the head camera (`VRHeadLamp`); per-weapon `flashLightGO` forced off always. Fixes the stacking brightness the owner hit on 2 Nov, which was one lamp per weapon each reparented to the head |
 | Compass | **Implemented, unverified** | Head yaw instead of body yaw; the four-argument `UpdateTicks` invocation could not be checked without `UnityEngine.UI` |
 | No head recoil / bob / lurch | **Implemented** | Four `RangedWeapon` view-rotation patches and three `Helmet` bob patches, all gated on `inVR` |
-| Flashlight reparenting | **Implemented** | Moved to the head camera so the beam follows the eyes |
-| Visual tweaks | **Implemented, not gated** | Forces fog on with hardcoded values, AA off, shadow cascades off, vsync off — no config key, no VR-only justification recorded for the fog |
+| Flashlight reparenting | **Superseded** | See "Helmet lamp" above |
+| Visual tweaks | **Implemented, not gated** | Forces fog on with hardcoded values, AA off, shadow cascades off, vsync off — no config key, no VR-only justification recorded for the fog. `VRPostFX` additionally re-asserts AA/TAA, SSAO and DoF off every 2s, since the game's own video menu does not persist them. TAA matters most: it jitters the projection matrix and blends the sync pixel |
 | Diagnostics | **Good where it exists** | `HUDTreeDumper` on F9 is excellent. `verboseDebug` has no runtime switch (#12) |
 | Menus / lobby in VR | **Not started** | Separate cameras at (-1000, 22, 0); currently handled by trying to leave VR entirely, which is finding #1 |
 
@@ -88,12 +120,88 @@ Worth reading before trusting either. The code is what ships.
 | "Lean clamped to 12cm" | `README.md` How it works | `0.30f` in `VRHeadTracker.cs:26` |
 | "`VRWeapon.cs` — RH→LH `pos.z=-z, quat(-x,-y,z,w)`" | `README.md` Project files | The code converts through Euler angles, not quaternion components — which is not the same operation once pitch and roll combine (#6) |
 | "`XRAPI.cs` — … `D:/xrtemp` fallback" | `README.md` Project files | No such path exists in the code; only `Z:/tmp/xr` |
-| "Red pixel quad top-left (10x10)" | `README.md` How it works | 150 px, which is a deliberate and sound choice (the runtime samples one pixel; extra size survives a shifted corner) — but the doc and the code disagree |
+| "Red pixel quad top-left (10x10)" | `README.md` How it works | 150 px, which is a deliberate and sound choice (the runtime samples one pixel; extra size survives a shifted corner and WinlatorXR's letterboxing) — but the doc and the code disagree. As of 3 Nov it is not a quad either: it is an immediate-mode `GL` rect, so "quad" is doubly wrong |
 | "Post-processing disabled for VR: motionBlur, chromaticAberration, depthOfField" | `README.md` Features | No such code exists. `Docs/MetaAI/` records that `EnforceNoPostFX` was removed because it killed the HUD blend; the README still advertises it |
 | "HUD scaler works" | commit `a514f71` | Was read and discarded. Now drives `VRHudSafeArea` (#11) |
 | `RenderSettings.fogStartDistance` / `fogMode` "don't exist in Unity 4" | `MetaAI/BUG-FIXES.md`, `AGENT-ADVICE.md` | They do exist, the mod uses them, and it compiles. **[reflected]** See the corrections section of FINDINGS.md |
 | `CleanToBlendTarget` | throughout `Docs/MetaAI/` | **Accurate** — that is the RenderTexture's `.name`; `cleanToBendTarget` is the field holding it. An earlier revision of this audit wrongly called it a misspelling **[dnSpy]** |
 | "HUD only visible when paused (active bug)" | `MetaAI/CURRENT-PROGRESS.md` | Superseded. FIXED29 keeps `HUD UI Root` at 1.0, which is the stated fix for exactly that bug — so this entry describes the state *before* the current working tree |
+
+## What the device tests settled
+
+Three rounds on a Quest 3 (1, 2 and 3 Nov 2026) plus the decompiled game source
+in `Release/dnSpyResults/` overturned more of this audit than the code reading
+established. Each of these was diagnosed wrongly first, so the correction is
+recorded alongside the answer.
+
+**The pitch-black screen is lights being switched off, not geometry being
+culled.** `ToggleOcclusion` (decompiled) hangs off a renderer and does this:
+
+```csharp
+private void OnBecameInvisible() {
+    foreach (Light light in this.unityLights)           light.enabled = false;
+    foreach (GameObject go in this.occludedGameObjects) go.SetActive(false);
+}
+```
+
+When culling hides a room's marker renderer, every light in that room is
+disabled. The geometry still draws — it is unlit. This explains three things the
+culled-geometry theory never did: why `occlusion_culling=0` cured it on device,
+why the darkness **survived a respawn** (nothing re-enables those lights until
+the marker renderer is visible again), and why fixing it from the spawn-time
+near-clip patch kept failing.
+
+It also kills the obvious optimisation. Collapsing the far clip to "bound the
+cost" of running unculled was this audit's first answer and it is backwards:
+`OnBecameInvisible` fires for **frustum** culling too, so a far clip that snaps
+shut switches *more* lights off. A low steady `far_clip` is fine — the player
+walks through it predictably — but it must not be modulated per frame.
+
+**`HelmetOccluder` was never the cause, and hiding it was a mistake.** A comment
+in `Patches.cs` had claimed for months that it caused the black screen; on 2 Nov
+that was finally implemented, and the live `hud_tree.txt` disproved it the same
+run. It is layer 14 (`UIOverlay`), which only `HelmetCamera` draws, and
+`WorldCamera`'s culling mask excludes that layer — so it cannot draw over the
+world at all. Being runtime-spawned it cannot feed baked occlusion data either.
+Its renderer is enabled again; only its shadow casting is off, which was its one
+real reach into the world.
+
+**The red damage flash is an IMGUI-per-camera bug.**
+`MarineController.OnGameUI` draws it as one full-screen `GUI.Box` tinted alpha
+`0.25`. IMGUI is not camera-bound — Unity runs the GUI pass once per camera, and
+there are seven. `1 − 0.75⁷ ≈ 0.87`, very nearly opaque. On a monitor that reads
+as "the screen went red"; filling a headset it reads as the lights going out.
+Replaced with peripheral bands drawn from the mod's own overlay camera, which is
+the one place in the build that runs exactly once per frame.
+
+**`screen_fov` is consumed by the runtime.** 90 works on device against 98
+rendered. This retired a planned rewrite: declaring a narrower FOV than the
+camera renders shows the same scene shrunk toward the centre of the view at full
+resolution, which fits everything inside the visible part of the panel with no
+viewport rect, no black borders, no lost pixels, and without moving the sync
+pixel.
+
+**The flashlight stacked because each weapon owns its own `flashLightGO`.** Every
+weapon switch reparented another one to the head, and brightness accumulated
+until a respawn cleared them. One mod-owned copy now; the weapons' own lamps are
+forced off permanently.
+
+## Where this audit has been wrong
+
+Kept deliberately, because the pattern is the useful part: in every case the
+mistake was reasoning about the scene graph or the engine instead of reading
+`hud_tree.txt` or the decompiled source.
+
+| Claim | Corrected by | Reality |
+|---|---|---|
+| `MODE_VR = 0` in menus is a bug | Owner, 30 Oct | Deliberate and better. FINDINGS #1 withdrawn |
+| `Docs/MetaAI/` misspelled `CleanToBlendTarget` | dnSpy | Both spellings right — field `cleanToBendTarget`, `.name` `"CleanToBlendTarget"` |
+| `InputManager.IsInputUp` should be patched (#8) | `Toggler.cs` | Would invert `ToggleFlashlight`, `ToggleLaser`, `Aim` and `Crouch`. Finding reversed |
+| `ToggleFlashlight` will strobe (#10) | `Toggler.cs` | Not a defect; the proposed edge fix would have lit it for one frame |
+| The engine is Unity 4 | BepInEx startup log | Unity **5.6.7**. My supporting evidence ("CLR 2.0 assembly") was also wrong — that is the scripting runtime |
+| IMGUI needs "its own camera" | Unity docs | `OnGUI` is not camera-bound at all. This is also the root of the damage-flash bug |
+| `HelmetOccluder` causes the black screen | `hud_tree.txt` | Wrong camera, wrong layer, and runtime-spawned. See above |
+| Collapse the far clip inside geometry | `ToggleOcclusion.cs` | Would switch off *more* lights. Removed the same day it was written |
 
 ## What is genuinely impressive here
 
@@ -115,8 +223,28 @@ project by name*.
 
 ## What to do next
 
-See [NEXT_STEPS.md](NEXT_STEPS.md). The short version: the four items in the
-"non-negotiable" category of `general_wxr/CLAUDE.md` — sync pixel, borderless
-window, quaternion normalisation, single handedness swap — are the ones that
-are wrong or missing, and they are all small, mechanical changes. They should
-go before any new feature.
+See [NEXT_STEPS.md](NEXT_STEPS.md).
+
+Of the four "non-negotiable" items in `general_wxr/CLAUDE.md`, three are now
+done: quaternion normalisation and the single handedness swap (both at ingest,
+#6), and the sync pixel (rewritten 3 Nov). **Borderless window enforcement is
+the one still missing** — no code touches the window at all (#5).
+
+Then, in order:
+
+1. **Device-test the 3 Nov build.** Four independent changes landed at once,
+   against the "one change per deploy" rule, because they were diagnosed
+   together: `occlusion_culling=0` + `far_clip=60`, the peripheral damage bands,
+   the global sync pixel, and `HelmetOccluder`'s renderer going back. If the
+   build misbehaves, that is the order to bisect in.
+2. **Find the `far_clip` floor on device.** It is live in the VR Settings panel.
+   Watch for distant rooms visibly lighting up as you approach — that is
+   `ToggleOcclusion`, and it is the signal the value is too low.
+3. **Borderless window** (#5).
+4. **Commit.** Nothing since `e648e72` is committed, including this doc set and
+   nine source files.
+
+Unstarted and still unassigned: binding `Aim` to a button (needs the owner's
+call on which), `LeanLeft` / `LeanRight` from physical lean, reading
+`Z:/tmp/xr/system` for headset auto-detection, and reconciling the root
+`README.md` with the table above.

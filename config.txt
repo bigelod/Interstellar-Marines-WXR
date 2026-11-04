@@ -32,23 +32,52 @@ light_forward=0.10
 # geometry starts z-fighting.
 near_clip=0.05
 
-# Unity occlusion culling on the player camera, while the camera is in OPEN
-# SPACE. 1 = on, the normal fast path. Leave it at 1.
-# It no longer needs to be turned off to cure the pitch-black screen: that only
-# happens while the camera is inside geometry, and the mod now detects exactly
-# that condition each frame and turns culling off for as long as it lasts.
+# Unity occlusion culling on the player camera. 1 is both the default and the fast
+# path - culling is what skips the draw calls, so 0 costs frames rather than
+# saving them.
+# It was defaulted to 0 on 3 Nov because in this game occlusion culling does not
+# merely skip draw calls, it switches the lights off: ToggleOcclusion.
+# OnBecameInvisible disables every Light in a room that culls out, so when the
+# camera ends up inside geometry the world is still drawn, just unlit. That was the
+# pitch-black screen, and why it survived a respawn. The blackouts are gone as of
+# the 3 Nov build and 1 behaves on device, so it is back on.
+# 0 = lights stay on everywhere, at a real cost in a corridor game.
+# 1 = the normal fast path, with the mod forcing it off per frame for as long as
+#     the camera is detected inside geometry.
 occlusion_culling=1
 
-# View distance, metres.
-# far_clip is the normal one. inside_far_clip is what the view distance collapses
-# to while the camera is inside geometry - occlusion culling has to be off there
-# or the level disappears, and a short view distance is what keeps that cheap,
-# because frustum culling still runs and nothing beyond it is drawn at all.
-# Lower inside_far_clip = cheaper, and less of the map visible through the wall
-# you are standing in. Raise it if being inside geometry feels too claustrophobic;
-# lower it if the frame rate dips when you clip into a wall.
-far_clip=80
-inside_far_clip=8
+# View distance, metres. 80 originally, then 60; 45 because this is a horror game
+# and nearly everything that matters is at corridor range.
+# Not purely a draw-cost knob: ToggleOcclusion also unlights anything that
+# frustum-culls out, so taking this too low makes distant rooms visibly light up
+# as you walk toward them. Tune it on device from the VR Settings panel.
+#
+# THE FOG FOLLOWS THIS NUMBER. Linear fog runs from 45% to 95% of far_clip, so the
+# view is walled off by murk just before the clip plane rather than having geometry
+# pop through a hard edge. Change far_clip and the fog moves with it, live.
+far_clip=45
+
+# Damage feedback. In VR the game's full-screen red flash is suppressed entirely
+# and replaced with two red bands in peripheral vision, the approach proven in
+# Shogo-VR (commit ab012bc).
+#
+# The original had to go: MarineController draws it as one full-screen GUI.Box,
+# and IMGUI runs once per CAMERA, not once per frame - with seven cameras in the
+# scene a 0.25 tint composites to about 0.87, which fills a headset's whole field
+# of view and reads as the lights going out rather than as a flash. The bands are
+# drawn from the mod's own overlay camera, exactly once per frame.
+#
+# pain_alpha      peak opacity of the bands. 0 disables them.
+# pain_bar_width  peak width of each band as a fraction of the VISIBLE width.
+#                 Both width and opacity scale down as the hit fades.
+# pain_bar_inset  how much of the panel WinlatorXR actually shows. The bands sit
+#                 at the edge of that region and grow inward, so at the default
+#                 Confirmed on device on 3 Nov that 1.00 is right: the panel is
+#                 wider than it is tall, so the vertical crop is the binding one
+#                 and the full frame width is in view.
+pain_alpha=0.55
+pain_bar_width=0.15
+pain_bar_inset=1.00
 
 # Scale applied to HelmetOccluder, the invisible shell around the head.
 # 1.0 = untouched. This mesh is on layer 14 (UIOverlay), which only HelmetCamera
@@ -70,3 +99,39 @@ occluder_scale=1.0
 # upper-left of the content area, and use the -/+ buttons. Every setting in this
 # file is in that panel, and every change is written straight back here.
 screen_fov=90
+
+# Render resolution, applied once at startup and again when changed from the VR
+# Settings panel. Lower is a real win here - every pixel is rendered, captured,
+# encoded and then repainted across the panel, so it is paid for more than once.
+# 1280x960 is the owner's balance point. 1024x768 is the next step down.
+# Set render_width=0 to leave the window alone entirely, which is the escape hatch
+# if a resolution change ever upsets the HUD bend pipeline.
+render_width=1280
+render_height=960
+
+# Supersampling for the visor HUD's own render target, written into
+# HUDCamera.hudScale. That field is NOT a screen-size knob despite the name: the
+# game sizes its two HUD render textures at Screen * hudScale AND divides the
+# canvas scaler's 3840x2160 reference resolution by the same number, so raising it
+# draws the same HUD, at the same apparent size, into proportionally more pixels.
+# It is the one lever that sharpens the HUD text without changing its fit.
+# 1.1 is the game's own default and the mod used to force 1.0, which is why the
+# text read as low-res in the headset. 2.0 doubles the linear resolution.
+# Cost: two render targets at 2x and two full-screen blits over 4x the pixels -
+# wind this back first if the frame rate is short.
+hud_supersample=2.0
+
+# Shadows. Only the player's helmet lamp casts any at all - every other light in
+# the level has its shadow casting switched off (VRLightTamer), because real-time
+# shadows are the most expensive thing a light can do and the torch is the only one
+# that tells you anything. These two govern that single light.
+# shadow_resolution: 0=Low, 1=Medium, 2=High, 3=VeryHigh.
+shadow_distance=15
+shadow_resolution=0
+
+# Edge length of the red sync patch in the top-left corner, in framebuffer pixels.
+# XRAPI 0.4 asks for 10x10 and 10 is what it draws. It sat at 150 for a long while
+# on the theory that a letterboxed panel might move the true corner; on device that
+# bought nothing and was plainly visible to the player. Raise it only if the
+# runtime ever stops reading the frame id.
+sync_pixel_size=10
