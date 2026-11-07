@@ -216,6 +216,33 @@ class RangedWeapon_AttachToCamera_Patch
             VRWeapon v = go.AddComponent<VRWeapon>();
             v.rightDominant = VRManager.configDominant == "right";
         }
+
+        // --- Sprint view bob fix (VR) ---
+        // RangedWeapon.cs:2050-2055 — UpdateBob():
+        //   cameraRotationX.targetValue += cameraSprintBobRotationX * sprintAmplitude * sprintness * cameraSprintBobRotationXScale
+        // Zero the scales so sprint bob adds 0, walk / weapon / breath bob untouched.
+        // Leave sprintness alone — it also gates walk bob via (1 - sprintness - crouchedness) at :2042.
+        SetFloat(__instance, "cameraSprintBobRotationXScale", 0f); // was 1.125
+        SetFloat(__instance, "cameraSprintBobRotationYScale", 0f); // was -1.5
+        SetFloat(__instance, "cameraSprintBobRotationZScale", 0f); // was 0.75
+        try
+        {
+            Type t = __instance.GetType();
+            FieldInfo f = t.GetField("cameraBobSprintAmplitudeOverSpeed", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (f != null) f.SetValue(__instance, new AnimationCurve(new Keyframe(0f, 0f), new Keyframe(20f, 0f)));
+        }
+        catch { }
+    }
+
+    static void SetFloat(object inst, string name, float v)
+    {
+        try
+        {
+            Type t = inst.GetType();
+            FieldInfo f = t.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (f != null) f.SetValue(inst, v);
+        }
+        catch { }
     }
 }
 

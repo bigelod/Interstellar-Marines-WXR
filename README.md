@@ -1,7 +1,7 @@
 # Interstellar-Marines-WXR
 An attempt to do a "monocular VR" 6DOF experience for **Interstellar Marines** on **Standalones** via **WinlatorXR**
 
-Created with the help of Meta.AI and Claude Code Opus 5 (Medium effort)
+Created with the help of Meta.AI and Claude Code Opus 5 (Medium effort) and OpenCode GO DeepSeek V4.1 Flash
 
 Thanks to Luboš, GmoLargey, and others for their work on [WinlatorXR](https://github.com/WinlatorXR/WinlatorXR) and everyone else who had contributed to portable PC gaming via Winlator on other platforms
 

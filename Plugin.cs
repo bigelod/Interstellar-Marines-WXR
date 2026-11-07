@@ -101,7 +101,7 @@ public class VRManager : BaseUnityPlugin
     public static int renderHeight = 960;
     // Shadows. Only the player's helmet lamp casts any (VRLightTamer), and it casts them
     // at this distance and resolution. 0=Low, 1=Medium, 2=High, 3=VeryHigh.
-    public static float shadowDistance = 15f;
+    public static float shadowDistance = 10f;
     public static int shadowResolution = 0;
 
     // Resolved once in Awake, then re-read every 2s by PollConfig so values can be
