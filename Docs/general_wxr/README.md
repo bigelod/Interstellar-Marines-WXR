@@ -133,6 +133,7 @@ Each is explained where it is cited.
 |---|---|
 | No packets arrive at all, no error | `version` file missing, misspelled or an unsupported number - the runtime then builds no implementation and starts no listener. It is read **once**, at startup. |
 | Packets stop arriving after they had been working | You sent `MODE_VR = 0`, which disables the whole inbound stream. Deliberate for menus and a good default there; an accident everywhere else. Keep sending the outbound packet so you can turn it back on. |
+| Packets stop after the runtime restarts | The runtime wiped `Z:\tmp\xr` and your `version` file was written only if absent. Write it unconditionally and re-check; see `XRAPI_V0_4_DESC.md` section 2. |
 | Every packet arrives twice | You bound 7872 *and* 7873. From 0.4 the runtime sends the same packet to both; they are duplicates, not a fallback. |
 | Head tracking swims, lags or sickens, but the maths is right | The sync pixel. Wrong value, wrong corner, drawn before something that overwrites it, filtered or blended, green not 0 - or a title bar moving the corner. |
 | Sync implemented and nothing changed | The window has chrome, so the runtime is sampling the title bar, not your pixel. |

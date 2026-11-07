@@ -54,6 +54,17 @@ public static class XRAPI
     static int rxTimeouts = 0;
     static float lastRxTimeoutLog = -999f;
 
+    // Handshake files. The runtime wipes Z:/tmp/xr at its own startup, so `version`
+    // must be written unconditionally and re-checked while the session runs. The old
+    // "only if absent" guard could leave the mod with no handshake at all after a
+    // runtime restart, which presents as a silent pose stream with no error.
+    static string handshakeDir = "Z:/tmp/xr";
+    static float lastHandshakeCheck = -999f;
+    static bool hasDetection = false;
+    static bool detectedUpsideDown = false;
+    static string detectedMake = "";
+    static string detectedProduct = "";
+
     static int leftHapticFrames = 0;
     static int rightHapticFrames = 0;
     static int modeVR = 1; // 1 to enable VR, 0 to disable VR
@@ -76,35 +87,11 @@ public static class XRAPI
 
         if (VRManagerState.isSetup) return;
 
-        string dataDirectory = "Z:/tmp/xr";
-
-        if (!Directory.Exists(dataDirectory))
-        {
-            if (Directory.Exists("Z:/tmp"))
-            {
-                Directory.CreateDirectory(dataDirectory);
-            }
-        }
-
-        if (Directory.Exists(dataDirectory))
-        {
-            string versionFile = dataDirectory + "/version";
-
-            if (!File.Exists(versionFile))
-            {
-                try
-                {
-                    using (StreamWriter sw = new StreamWriter(versionFile))
-                    {
-                        sw.WriteLine("0.4");
-                    }
-                }
-                catch
-                {
-
-                }
-            }
-        }
+        // Write the handshake unconditionally, then read `system` if the runtime has
+        // already written it. If it has not, TickHandshake retries every 2s.
+        handshakeDir = ResolveHandshakeDir();
+        EnsureHandshakeFiles(true);
+        ReadSystemInfo();
 
         if (client == null)
         {
@@ -145,6 +132,159 @@ public static class XRAPI
         catch { }
 
         VRManagerState.isSetup = true;
+    }
+
+    // On device this is Z:/tmp/xr. If Z: does not exist (desktop tester) use an
+    // xrtemp folder next to the DLL, so the same binary runs in both places.
+    static string ResolveHandshakeDir()
+    {
+        try
+        {
+            if (Directory.Exists("Z:/tmp/xr")) return "Z:/tmp/xr";
+            if (Directory.Exists("Z:/tmp"))
+            {
+                Directory.CreateDirectory("Z:/tmp/xr");
+                return "Z:/tmp/xr";
+            }
+        }
+        catch { }
+
+        try
+        {
+            string dllDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            if (!string.IsNullOrEmpty(dllDir))
+            {
+                string local = Path.Combine(dllDir, "xrtemp");
+                if (!Directory.Exists(local)) Directory.CreateDirectory(local);
+                return local;
+            }
+        }
+        catch { }
+
+        return "Z:/tmp/xr";
+    }
+
+    static bool WriteIfDifferent(string path, string text)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                string current = File.ReadAllText(path).Trim();
+                if (current == text.Trim()) return false;
+            }
+            // ASCII, not the default UTF-8: the runtime matches `version` with
+            // startsWith, and a stray BOM turns "0.4" into an unrecognised value.
+            File.WriteAllText(path, text, Encoding.ASCII);
+            return true;
+        }
+        catch (Exception e)
+        {
+            try { VRManagerLogger.LogWarn("[IMVR] Handshake write failed: " + path + " : " + e.Message); } catch { }
+            return false;
+        }
+    }
+
+    static void EnsureHandshakeFiles(bool logAlways)
+    {
+        try
+        {
+            if (!Directory.Exists(handshakeDir)) Directory.CreateDirectory(handshakeDir);
+        }
+        catch (Exception e)
+        {
+            try { VRManagerLogger.LogWarn("[IMVR] Handshake dir failed: " + handshakeDir + " : " + e.Message); } catch { }
+            return;
+        }
+
+        bool wroteVersion = WriteIfDifferent(Path.Combine(handshakeDir, "version"), "0.4" + Environment.NewLine);
+        bool wroteVr = WriteIfDifferent(Path.Combine(handshakeDir, "vr"), "VR" + Environment.NewLine);
+        if (logAlways || wroteVersion || wroteVr)
+        {
+            string suffix = (wroteVersion || wroteVr) ? " (rewritten)" : "";
+            try { VRManagerLogger.LogInfo("[IMVR] Handshake " + handshakeDir + " version=0.4 vr=VR" + suffix); } catch { }
+        }
+    }
+
+    // Called every 2s from VRInputRunner.Update. Repairs the directory if the runtime
+    // restarted and wiped it, and keeps retrying `system` until it appears.
+    public static void TickHandshake()
+    {
+        float now = 0f;
+        try { now = Time.realtimeSinceStartup; } catch { return; }
+        if (now - lastHandshakeCheck < 2f) return;
+        lastHandshakeCheck = now;
+        EnsureHandshakeFiles(false);
+        if (!hasDetection) ReadSystemInfo();
+        ApplyDetectedHandedness();
+    }
+
+    // `system` line 1 is the manufacturer, line 2 the product codename. The codename
+    // mapping is from Docs/general_wxr/XRAPI_V0_4_DESC.md; default to Quest 3 rather
+    // than failing when the file is absent.
+    static void ReadSystemInfo()
+    {
+        try
+        {
+            string systemFile = Path.Combine(handshakeDir, "system");
+            if (!File.Exists(systemFile)) return;
+
+            string[] lines = File.ReadAllLines(systemFile);
+            string make = "META";
+            string product = "";
+            if (lines.Length > 0 && lines[0] != null && lines[0].Trim().Length > 0) make = lines[0].Trim().ToUpperInvariant();
+            if (lines.Length > 1 && lines[1] != null) product = lines[1].Trim().ToUpperInvariant();
+            if (make == "OCULUS") make = "META";
+            if (make.Length == 0) make = "META";
+
+            // Do not latch a partial read. The runtime writes this file at startup;
+            // if we catch it half-written, retry on the next TickHandshake instead of
+            // assuming Quest 3 forever.
+            if (lines.Length < 2 || product.Length == 0) return;
+
+            bool upsideDown = false;
+            string label = "unknown";
+            if (product == "EUREKA" || product == "PANTHER") { upsideDown = false; label = "Quest 3"; }
+            else if (product == "HOLLYWOOD") { upsideDown = true; label = "Quest 2"; }
+            else if (product == "SEACLIFF") { upsideDown = true; label = "Quest Pro"; }
+            else if (product == "MONTEREY") { upsideDown = false; label = "Quest 1"; }
+            else if (make == "META") { upsideDown = false; label = "Quest 3 (default)"; }
+            else { label = make + "/" + product; }
+
+            detectedMake = make;
+            detectedProduct = product;
+            detectedUpsideDown = upsideDown;
+            hasDetection = true;
+            try
+            {
+                VRManagerLogger.LogInfo("[IMVR] Headset: make=" + make
+                    + " product=" + (product.Length > 0 ? product : "?")
+                    + " -> " + label + ", hands "
+                    + (upsideDown ? "upside-down (flipHands=true)" : "upright (flipHands=false)"));
+            }
+            catch { }
+            ApplyDetectedHandedness();
+        }
+        catch (Exception e)
+        {
+            try { VRManagerLogger.LogWarn("[IMVR] system read failed: " + e.Message); } catch { }
+        }
+    }
+
+    // Auto-detection is a default, not an override. An explicit flipHands= in
+    // config.txt always wins; flipHands=auto (or no key) lets this apply.
+    static void ApplyDetectedHandedness()
+    {
+        if (!hasDetection) return;
+        if (VRManager.flipHandsExplicit) return;
+        if (VRManager.flipHands == detectedUpsideDown) return;
+        VRManager.flipHands = detectedUpsideDown;
+        try
+        {
+            VRManagerLogger.LogInfo("[IMVR] flipHands auto -> " + VRManager.flipHands.ToString()
+                + " (" + detectedMake + "/" + detectedProduct + ")");
+        }
+        catch { }
     }
 
     static void RecvLoopParam(object obj)
@@ -625,5 +765,22 @@ public static class XRAPI
         try { if (client != null) client.Close(); } catch { }
         try { if (sendClient != null) sendClient.Close(); } catch { }
         try { if (recvThread != null) recvThread.Abort(); } catch { }
+
+        // `vr` declares that this process wants VR; leaving it behind after a clean
+        // shutdown can convince the runtime that a dead process still wants it.
+        // `version` stays: it is the protocol this binary speaks, not a live claim.
+        try
+        {
+            if (!string.IsNullOrEmpty(handshakeDir))
+            {
+                string vrFile = Path.Combine(handshakeDir, "vr");
+                if (File.Exists(vrFile))
+                {
+                    File.Delete(vrFile);
+                    VRManagerLogger.LogWarn("[IMVR] Handshake vr file removed");
+                }
+            }
+        }
+        catch { }
     }
 }

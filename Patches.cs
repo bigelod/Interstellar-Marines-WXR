@@ -218,10 +218,10 @@ class RangedWeapon_AttachToCamera_Patch
         }
 
         // --- Sprint view bob fix (VR) ---
-        // RangedWeapon.cs:2050-2055 — UpdateBob():
+        // RangedWeapon.cs:2050-2055 ï¿½ UpdateBob():
         //   cameraRotationX.targetValue += cameraSprintBobRotationX * sprintAmplitude * sprintness * cameraSprintBobRotationXScale
         // Zero the scales so sprint bob adds 0, walk / weapon / breath bob untouched.
-        // Leave sprintness alone — it also gates walk bob via (1 - sprintness - crouchedness) at :2042.
+        // Leave sprintness alone ï¿½ it also gates walk bob via (1 - sprintness - crouchedness) at :2042.
         SetFloat(__instance, "cameraSprintBobRotationXScale", 0f); // was 1.125
         SetFloat(__instance, "cameraSprintBobRotationYScale", 0f); // was -1.5
         SetFloat(__instance, "cameraSprintBobRotationZScale", 0f); // was 0.75
@@ -878,6 +878,9 @@ public class VRInputRunner : MonoBehaviour
     void Update()
     {
         try { VRManager.PollConfig(); } catch { }
+        // Repair the XrApi handshake if the runtime restarted and wiped Z:/tmp/xr,
+        // and keep trying `system` until it appears so flipHands can auto-detect.
+        try { XRAPI.TickHandshake(); } catch { }
         // Up/down while paused nudges screen_fov by 10 and writes it back to config.txt.
         // Runs before PollConfig would overwrite it - Persist rewrites the file, so the
         // 2s poll reads back the value we just set rather than reverting it.

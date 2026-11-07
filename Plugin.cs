@@ -30,6 +30,9 @@ public class VRManager : BaseUnityPlugin
     public static float turnSpeed = 45f;
     public static float deadzone = 0.2f;
     public static bool flipHands = false;
+    // True when config.txt names flipHands explicitly (true/false). False for
+    // flipHands=auto or no key, which lets XRAPI's `system` detection choose.
+    public static bool flipHandsExplicit = false;
 
     // View comfort, all live-tunable. Defaults raised from the original 0.08 because the
     // 1 Nov test showed the Marine's own body blocking the camera.
@@ -254,6 +257,7 @@ public class VRManager : BaseUnityPlugin
         try{
             if(configPath == null || !File.Exists(configPath)) return;
             string[] lines = File.ReadAllLines(configPath);
+            bool sawFlipHands = false;
             foreach(string line in lines){
                 string t = line.Trim();
                 if(t.StartsWith("#") || t.Length==0) continue;
@@ -264,7 +268,16 @@ public class VRManager : BaseUnityPlugin
                 if(k=="dominant_hand" || k=="dominant") configDominant = v;
                 if(k=="turn_speed"){ float f; if(float.TryParse(v, out f)) turnSpeed=f; }
                 if(k=="deadzone"){ float f; if(float.TryParse(v, out f)) deadzone=f; }
-                if(k=="fliphand" || k=="fliphands" || k=="flip_hands" || k=="fliphands") flipHands = (v=="true" || v=="1" || v=="yes");
+                if(k=="fliphand" || k=="fliphands" || k=="flip_hands"){
+                    sawFlipHands = true;
+                    if(v=="auto" || v.Length==0){
+                        // Let XRAPI's `system` detection choose; an explicit value still wins.
+                        flipHandsExplicit = false;
+                    } else {
+                        flipHands = (v=="true" || v=="1" || v=="yes");
+                        flipHandsExplicit = true;
+                    }
+                }
                 // How wide an angle the runtime should paint this frame across. This does
                 // NOT have to match what the camera rendered: declaring less than the true
                 // FOV shows the SAME world, shrunk toward the centre of the view, at full
@@ -293,6 +306,7 @@ public class VRManager : BaseUnityPlugin
                     float f; if(float.TryParse(v, out f) && f > 1f && f <= 180f) XRAPI.SetDeclaredFov(f);
                 }
             }
+            if(!sawFlipHands) flipHandsExplicit = false;
             VRInput.SetConfig(deadzone);
         } catch(Exception e){
             VRManagerLogger.LogError("[IMVR] Config error: "+e);

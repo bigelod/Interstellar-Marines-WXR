@@ -42,7 +42,10 @@ the file rather than working around it.
   channel, green 0, 10x10 at the top-left, drawn last, in both halves under
   SBS. Never rescale or gamma-correct it. Get this right before the camera.
 - **The window must be borderless and fill the display**, re-applied every
-  frame. Chrome in the corner means the sync pixel is never read.
+  frame. Chrome in the corner means the sync pixel is never read. A true
+  fullscreen presentation satisfies this; verify from a capture that no chrome
+  is visible, and do not assume the engine's window mode is stable across mode
+  changes.
 - **Normalise every quaternion on ingest**, unconditionally.
 - **Swap handedness once, at ingest.** Then never test the handedness flag
   again for anything spatial — a second test applies the swap twice.

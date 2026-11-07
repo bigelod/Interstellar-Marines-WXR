@@ -1,8 +1,12 @@
 dominant_hand=right
 turn_speed=80
 deadzone=0.20
-flipHands=false
-# set true for Pico 4 Ultra if hands are upside down vs Quest 3
+# Auto-detect from Z:/tmp/xr/system when the runtime provides it:
+#   EUREKA / PANTHER -> Quest 3 (upright)
+#   HOLLYWOOD        -> Quest 2 (upside-down)
+#   SEACLIFF         -> Quest Pro (upside-down, untested)
+# Force false/true here if detection is wrong for your headset.
+flipHands=auto
 
 # Shrinks the screen-anchored HUD (compass + squad info at the top, ammo / TP /
 # health at the bottom) toward the centre of the view so nothing sits in the

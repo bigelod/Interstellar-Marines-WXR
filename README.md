@@ -1,92 +1,134 @@
 # Interstellar-Marines-WXR
-An attempt to do a "monocular VR" 6DOF experience for **Interstellar Marines** on **Standalones** via **WinlatorXR**
+An attempt to do a "monocular VR" 6DOF experience for **Interstellar Marines** on **Standalones** via **WinlatorXR**.
 
-Created with the help of Meta.AI and Claude Code Opus 5 (Medium effort) and OpenCode GO DeepSeek V4.1 Flash
+Created with the help of Meta.AI and Claude Code Opus 5 (Medium effort) and OpenCode GO DeepSeek V4.1 Flash.
 
-Thanks to Luboš, GmoLargey, and others for their work on [WinlatorXR](https://github.com/WinlatorXR/WinlatorXR) and everyone else who had contributed to portable PC gaming via Winlator on other platforms
+Thanks to Luboš, GmoLargey, and others for their work on [WinlatorXR](https://github.com/WinlatorXR/WinlatorXR) and everyone else who has contributed to portable PC gaming via Winlator on other platforms.
 
-The text below is also written with help of Meta.AI and Claude Code and will be manually improved as the project continues and behavior solidifies
+The port runs the game fullscreen in the container, so no window-chrome handling is needed. The mod targets **XrApi 0.4**, **mono** (`MODE_3D = 0`), and keeps the game's own 32-bit Unity 5.6.7 renderer.
 
-### How it works
-- `Helmet.InitFirstPersonCamera()` -> `VRHeadTracker` attached to Helmet base (not just WorldCamera) so visor + camera move together. Lean clamped to 12cm, no roomscale walking.
-- `RangedWeapon.AttachToCamera()` -> `VRWeapon` puts weapon model at dominant hand, muzzle stays on body (anti-cheat safe, only rotation = hand rotation)
-- `InputManager` patched - VR overrides block keyboard/mouse for mapped actions, ESC/menus still work
--  XrAPI UDP: listens `127.0.0.1:7872` (head + hands), sends `127.0.0.1:7278` `L_HAPTICS R_HAPTICS MODE_VR MODE_3D FOVX FOVY` for haptics + first-frame wakeup + 2D/VR auto switch
--  Red 
-pixel quad top-left (10x10) flashing with `HMD_SYNC` frame ID for WinlatorXR pacing
+## How it works
 
-Based on [WinlatorXR/SixDOFinator_SampleProject](https://github.com/WinlatorXR/SixDOFinator_SampleProject) and [HaloCEWXR docs](https://github.com/winlatorxr/halocewxr) for haptics/first-frame.
+- `Helmet.InitFirstPersonCamera()` -> `VRHeadTracker` is attached to `WorldCamera`. Head position and rotation come from the HMD; lean is clamped to **0.30 m**, no roomscale walking. The eye offset (`eye_height`, `eye_forward`) is applied by the tracker so it is live-tunable.
+- `RangedWeapon.AttachToCamera()` -> `VRWeapon` places the weapon from the dominant hand. The frame is built in `VRHands`: **head position for height, body rotation for orientation**, so looking around does not swing the gun. Only the muzzle rotation follows the hand; the logical shot still originates from the body.
+- `InputManager` and six raw `UnityEngine.Input` methods are patched. `VRInputGate` blocks mouse/keyboard **only in VR gameplay**; menus and pause still allow native input so uGUI buttons and ESC work.
+- XrApi UDP: listens on **127.0.0.1:7872** (or 7873, whichever is free — one socket, not both), and sends **127.0.0.1:7278** as `L_HAPTICS R_HAPTICS MODE_VR MODE_3D FOVX FOVY`.
+- Handshake: writes `Z:/tmp/xr/version` (`0.4`) and `vr` (`VR`) unconditionally, repairs them if the runtime restarts and wipes the directory, and reads `system` to auto-detect the headset.
+- `MODE_VR=1` in gameplay, `MODE_VR=0` in menus/pause. `0` is deliberate: it stops the unused pose stream, restores the runtime's own mouse control, and leaves immersive presentation so a whole menu is readable at once.
+- Red sync pixel: a **10x10** immediate-mode `GL` rect in the top-left, drawn by the mod's own `DontDestroyOnLoad` overlay camera at depth 1000. No texture, blending, filtering, or gamma correction — the runtime reads the exact red value.
+- HUD: the neon visor is the game's bent-glass pipeline. `VRGlassAnchor` glues the glass mesh to the VR head, preserving its Animator pose; `VRHudSafeArea` shrinks the uGUI content toward the centre; the physical helmet shell is hidden.
+- Occlusion: this game's culling switches room lights off (`ToggleOcclusion.OnBecameInvisible`), not just draw calls. `VRClipGuard` forces occlusion culling off while the camera is inside geometry and keeps `far_clip` steady.
 
 ## Features
-- 6DOF head (yaw/pitch/roll correct, RH->LH fixed)
-- Hands in front, no mirror, `flipHands` config flag optional for Pico/Quest 2 roll bug
-- Weapon model at controller, logical fire from body
-- Right stick up/down cycles Slot01->Slot02->Slot03 loop
-- Haptics on shoot (right controller 6-8 frames)
-- Auto 2D when not in-game: title screen / paused / no local character = `MODE_VR=0` flat screen, in-game = `MODE_VR=1`
-- Post-processing disabled for VR: motionBlur, chromaticAberration, depthOfField
-- Keyboard/mouse blocked for mapped VR inputs (prevents double-move)
 
-## Default Controls
+- **6DOF head tracking** with yaw/pitch/roll; lean clamped to 0.30 m.
+- **Weapon at the dominant hand**, body-relative orientation, survives level changes.
+- **`flipHands=auto`** — reads `Z:/tmp/xr/system` and maps `EUREKA`/`PANTHER` -> Quest 3, `HOLLYWOOD` -> Quest 2, `SEACLIFF` -> Quest Pro. An explicit `flipHands=true/false` overrides detection.
+- **Haptics on the dominant hand**, driven by the ammo counter: 6 frames when a round is spent, 10 frames on a weapon switch. A dry trigger or a refused shot does not buzz.
+- **Auto 2D/VR switching**: title screen, menus, pause, or no local Marine -> `MODE_VR=0`; in-game -> `MODE_VR=1`.
+- **HUD scaling** via `VRHudSafeArea` (`hudScale`, default 0.60), which moves edge-anchored widgets inward instead of pinning them.
+- **HUD text supersampling** (`hud_supersample`, default 2.0) via `HUDCamera.hudScale`.
+- **Sync pixel** (10 px) for WinlatorXR frame pacing.
+- **In-headset tuning menu**: pause, click **VR Settings**. Every knob is a row and every change is written back to `config.txt`.
+- **Comfort**: sprint bob removed, head recoil/lurch/visor bob suppressed in VR, blinders-on-damage replaced with peripheral red bands.
+- **Performance**: only the helmet lamp casts shadows; AA/TAA, ambient occlusion, and depth of field are forced off; Bloom is deliberately preserved because it is part of the HUD bend.
+- **Keyboard/mouse blocked only in VR gameplay**; menus, pause, ESC, and the console still work.
+
+## Default controls
 
 | Action | Binding |
 |---|---|
-| Move | Left stick + left thumb directions |
-| Turn | Right stick X (smooth turn, `turn_speed` in config) |
-| Weapon Switch | Right stick Y up/down cycles Slot01-03 loop (0.35s cooldown) - starts on Slot01 |
-| Jump | Right Grip |
-| Shoot | Right Trigger |
-| Interact / Use | Right A |
+| Move | Left stick, or left thumb directions |
+| Turn | Right stick X (smooth, `turn_speed`) |
+| Weapon switch | Right stick Y up/down, cycles Slot01-03 (0.35 s cooldown) |
+| Fire | Right trigger |
+| Jump | Right grip |
+| Interact / Use | Right A (hand ray) |
 | Reload | Right B |
-| Helmet Toggle | Left X |
-| Flashlight | Left Y |
-| Silencer double-tap | Left Trigger double tap |
-| Fire mode hold | Left Trigger hold >0.6s |
-| Crouch | Left Grip hold |
-| Sprint | Left Thumb click |
-| Menu / Mission Overview | Left Menu |
+| Crouch | Left grip (hold) |
+| Sprint | Left thumb click |
+| Helmet toggle | Left X |
+| Flashlight | Left Y (press to toggle) |
+| Silencer | Left trigger double-tap (within 0.35 s) |
+| Fire mode | Left trigger hold > 0.6 s |
+| Menu / Mission Overview | Left menu |
+| Recentre | Right thumb click |
+| **Tuning menu** | **Pause -> click "VR Settings"** |
 
-Mouse/Keyboard still works for unmapped: ESC, console, etc.
+`Aim` (iron sights) is currently **unbound and blocked**, so ADS is unreachable in VR. `ThrowGrenade`, `ToggleLaser`, `Slot04`, `LeanLeft`, and `LeanRight` are also unbound. These are deliberate gaps pending an owner decision, not silent bugs.
 
-## Setup - Release
+## Setup — Release
 
-**Recommended user steps:**
-1. Install Interstellar Marines (Steam) via WinlatorXR's store mode
-2. Install **BepInEx 5** x86: download `BepInEx_win_x64_5.4.23.5.zip`, extract to game root (where `InterstellarMarines.exe` is). Ensure winhttp.dll is allowed to use native, built-in in Wine config, then run game once to generate `BepInEx/` folders. Close game.
-3. Download latest release `InterstellarMarinesWXR.zip` from Releases
-4. Extract release into game root - should place `BepInEx/plugins/IMVR/IMVRMod.dll` + `config.txt`
-5. Launch via WinlatorXR on Quest/Pico: use DXVK + Turnip, set resolution 1400x1400.
+1. Install Interstellar Marines (Steam) via WinlatorXR's store mode.
+2. Install **BepInEx 5** x86: download `BepInEx_win_x64_5.4.23.5.zip`, extract to the game root (where `InterstellarMarines.exe` is). Ensure `winhttp.dll` is allowed to use native, built-in Wine config, then run the game once to generate the `BepInEx/` folders. Close the game.
+3. Download the latest release `InterstellarMarinesWXR.zip` from Releases.
+4. Extract the release into the game root — it should place `BepInEx/plugins/IMVR/IMVRMod.dll` and `config.txt`.
+5. Launch via WinlatorXR on Quest/Pico: use DXVK + Turnip, fullscreen, and a resolution you are happy with (1280x960 is the current default; 1400x1400 is also common).
 
-`config.txt` next to dll:
-> dominant_hand=right
->
-> turn_speed=45
-> 
-> deadzone=0.20
-> 
-> flipHands=0
+`config.txt` lives next to the DLL and is re-read every 2 seconds. The shipped defaults are:
 
+```ini
+dominant_hand=right
+turn_speed=80
+deadzone=0.20
+flipHands=auto
+hudScale=0.60
+screen_fov=90
+render_width=1280
+render_height=960
+hud_supersample=2.0
+near_clip=0.05
+far_clip=45
+occlusion_culling=1
+sync_pixel_size=10
+```
 
-## Build Advice - For Contributors
+Every key, with comments and safe ranges, is in the shipped `config.txt`.
+
+## Diagnostics
+
+- **F9** dumps the GameObject tree, cameras, and selected fields to `hud_tree.txt` next to the DLL. It deliberately ignores the verbose flag, so the useful dump always works.
+- The first line of the BepInEx log is a **build stamp** (`RELEASE`/`DEBUG` plus the assembly write time). If a change appears to do nothing, check this line first.
+- `UpdateVRModeFromGameState` logs a one-line signature on every mode transition and names which signal moved (`localChar`, `runningGame`, `marine`, `alive`, `gmPaused`, `timeScale`, `uiWantsPointer`).
+- `system` detection logs the make, product codename, mapped model, and chosen `flipHands`.
+
+## Build advice — contributors
 
 You need DLLs from your Interstellar Marines install to compile (Unity / .NET 3.5):
 
-1. Copy to `Libs/` (create folder if need be):
-      - `InterstellarMarines_Data/Managed/Assembly-CSharp.dll`
-      - `InterstellarMarines_Data/Managed/UnityEngine.dll`
-      - `InterstellarMarines_Data/Managed/uLink.dll'
-      - `BepInEx/core/BepInEx.dll` (generated after first run)
-      - `BepInEx/core/0Harmony.dll` (generated after first run)
+1. Copy to `Libs/` (create it if needed):
+   - `InterstellarMarines_Data/Managed/Assembly-CSharp.dll`
+   - `InterstellarMarines_Data/Managed/UnityEngine.dll`
+   - `InterstellarMarines_Data/Managed/uLink.dll`
+   - `BepInEx/core/BepInEx.dll` (generated after first run)
+   - `BepInEx/core/0Harmony.dll` (generated after first run)
+2. Open `IMVRMod.csproj` in VS2022/Rider. The project is `net35`, `LangVersion 3`, x86.
+3. Build -> `IMVRMod.dll`.
+4. Output to `BepInEx/plugins/IMVR/`.
 
-2. Open `IMVRMod.csproj` in VS2022/Rider, target .NET Framework 3.5, x86
-3. Build -> `IMVRMod.dll`
-4. Output to `BepInEx/plugins/IMVR/`
+`Directory.Build.props` defaults the configuration to **Release**, so a bare `dotnet build` does not quietly produce a Debug DLL for the headset.
 
-**Project files:**
-- `Plugin.cs` - BepInEx entry, config load, Harmony patch, input runner
-- `XRAPI.cs` - UDP 7872 receive + 7278 send (first frame + haptics + MODE_VR switch), file markers, `D:/xrtemp` fallback
-- `VRHeadTracker.cs` - fixes double offset bug, HMD RH->LH `-x,-y,z`, visor lock, post-processing disable
-- `VRWeapon.cs` - RH->LH `pos.z=-z, quat(-x,-y,z,w)` + HMD-local to world via HelmetBase parent
-- `VRInput.cs` - maps bools to IM KeyBinds, Slot01-03 loop, blocks KB/mouse for mapped
-- `Patches.cs` - Harmony patches for Helmet, RangedWeapon, InputManager IsInput/IsInputDown + GetAxis + SyncPixelQuad
-- `SyncPixelQuad.cs` - red/black quad top-left flashing with `frameId %2` (HMD_SYNC)
+### Project files
+
+- `Plugin.cs` — BepInEx entry, config load/poll, build stamp, resolution, Harmony patch-all, input runner, tuning menu.
+- `XRAPI.cs` — XrApi 0.4 handshake (`version`, `vr`, `system` detection), UDP receive/send, pose conversion, haptics, mode switching.
+- `VRHeadTracker.cs` — head pose on `WorldCamera`, lean clamp, `VRClipGuard`.
+- `VRHands.cs` — the single dominant-hand world pose shared by the weapon and the interaction ray.
+- `VRWeapon.cs` — weapon model placement and ammo-driven haptics.
+- `VRHandInteract.cs` — hand-ray interaction and the Use toggle.
+- `VRInput.cs` / `VRInputGate.cs` — XrApi buttons/sticks to `KeyBind` overrides, and the single native-input gate.
+- `VRHudSafeArea.cs` — uGUI content shrink that does not touch the bend pipeline.
+- `SyncPixelQuad.cs` — global overlay camera and red `GL` sync pixel.
+- `VRPainOverlay.cs` — suppresses the game's per-camera red flash, draws peripheral bands once.
+- `VRClipGuard.cs` — culling-off-inside-geometry, steady far clip, fog.
+- `VRPostFX.cs` / `VRLightTamer.cs` / `VRHeadLamp.cs` — surgical performance work.
+- `VRConfigFile.cs` / `VRTuneMenu.cs` / `VRFovTuner.cs` — live tuning.
+- `Patches.cs` — Harmony patches plus `VRGlassAnchor` and `VRVisualTweaks`.
+- `HUDTreeDumper.cs` — F9 scene/camera dump.
+
+## Documentation
+
+- `Docs/general_wxr/` — the game-agnostic WinlatorXR rules. Read `CLAUDE.md` before planning.
+- `Docs/MetaAI/` — **archived** session history, including the HUD dead ends. Best record of *why*, not current fact.
+- `Docs/ClaudeCode/` — **archived** 30 Oct audit through the 3 Nov device tests. Useful history; check the OpenCode notes for the current delta.
+- `Docs/OpenCode/DeepSeek41Flash/` — current reconciliation, handshake record, code map, and ranked next work.

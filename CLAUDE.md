@@ -6,17 +6,14 @@ non-negotiables in the code, and the working method.
 
 Then read, in this order:
 
-- **`Docs/ClaudeCode/CURRENT_FEATURES.md`** — what the mod does today, and a
-  list of things that look like bugs but are load-bearing. Read this before
-  "tidying" anything.
-- **`Docs/ClaudeCode/STATUS.md`** — where the port actually stands, and which
-  claims in the root `README.md` and `Docs/MetaAI/` are no longer true.
-- **`Docs/ClaudeCode/ARCHITECTURE.md`** — what the code does at runtime.
-- **`Docs/ClaudeCode/FINDINGS.md`** — known defects, with file and line.
-- **`Docs/ClaudeCode/NEXT_STEPS.md`** — the ordered plan.
-- **`Docs/MetaAI/`** — the history of how the code got here, including the
-  dead ends on the HUD pipeline. Still the best record of *why* things are the
-  way they are; see `STATUS.md` for the handful of places it is wrong.
+- **`Docs/OpenCode/DeepSeek41Flash/`** — the current reconciliation. Start with
+  `CURRENT-STATE.md` for the repo/build/config snapshot, then `HANDSHAKE.md` for
+  the XrApi handshake, then `CODE-MAP.md` and `NEXT-WORK.md`.
+- **`Docs/ClaudeCode/`** — **archived** 30 Oct audit through the 3 Nov device
+  tests. Still excellent on the HUD pipeline and the *why* behind load-bearing
+  oddities, but do not treat it as current after 3 Nov.
+- **`Docs/MetaAI/`** — **archived** session history, including the HUD dead
+  ends. The best record of *why* things are the way they are; not current fact.
 
 ## Hard constraints
 
@@ -28,9 +25,11 @@ Then read, in this order:
 - **Roughly half this mod reaches into the game by string-named reflection**,
   which the compiler cannot check. Verify member names against the assemblies
   in `Libs/` before trusting a field name from any document, including these.
-- **Do not "fix" the helmet/HUD system by removing it.** The bent-NGUI-onto-
+- **Do not "fix" the helmet/HUD system by removing it.** The bent-uGUI-onto-
   curved-glass visor is the game's identity, and the HUD glue is the hardest
-  working part of this mod. `Docs/ClaudeCode/ARCHITECTURE.md` has the pipeline.
+  working part of this mod. `Docs/OpenCode/DeepSeek41Flash/CODE-MAP.md` has the
+  current pipeline; the archived `Docs/ClaudeCode/ARCHITECTURE.md` has more
+  history.
 - **`HUDTreeDumper` on F9** writes `hud_tree.txt` next to the DLL. Use it
   instead of reasoning about the scene graph.
 - Testing happens on a Quest 3 through WinlatorXR, by the owner. Nothing is

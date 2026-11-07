@@ -99,6 +99,13 @@ exists, so the version cannot change during a session.
 up, or be prepared to rewrite them - and do not assume a file you wrote
 earlier survived.
 
+**[practice - Interstellar Marines port]** Do **not** guard `version` with
+"write only if absent". Write it unconditionally and re-check every couple of
+seconds; otherwise a runtime restart can leave a running game with no handshake
+at all, which presents as a silent pose stream with no error. Write `vr` too and
+delete it on clean shutdown, and read `system` for the product codename so a
+per-headset controller quirk can be detected instead of hand-configured.
+
 **[runtime] `system` has seven lines, not two:**
 
 ```
