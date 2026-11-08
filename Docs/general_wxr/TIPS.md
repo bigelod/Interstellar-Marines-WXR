@@ -306,6 +306,28 @@ Take the value from the live frame every frame. Games change FOV - zoom,
 aspect, cutscenes - so this cannot be a setting even if the first value
 happens to be right.
 
+### Render the world below the window resolution; keep the UI at full resolution
+
+Fill rate is usually the wall, and the world is the expensive part. Do not lower the
+whole window just to save world pixels - that also lowers text, and tiny HUD glyphs are
+the first thing a player notices.
+
+XOPS-WXR does the split explicitly: the game keeps its native **640x480** render target,
+that frame is copied to a texture and stretched across the real back buffer, and the
+text HUD is drawn afterwards **at the window's real resolution**. The world pays for
+640x480; the text stays sharp.
+
+The same split works in Unity without touching the game's HUD pipeline:
+
+- point the world camera's `targetTexture` at `Screen * world_render_scale`;
+- add a depth-between camera with `clearFlags = Nothing`, `cullingMask = 0` and
+  `Graphics.Blit` the low-res target to the screen;
+- leave the HUD/visor cameras on `Screen`, so they still render at full resolution.
+
+Expose the scale (0.5 is 640x480 inside 1280x960) and keep `1.0` as the rollback. Every
+extra full-screen pass has a cost, so measure the net win on device rather than assuming
+it.
+
 ### Controller poses arrive upside down on some headsets - ship the override
 
 Meta controllers report the hands rolled 180 degrees. HWXR carries this as
@@ -350,6 +372,20 @@ than against the view model, and it draws through the weapon it is attached to.
 ### Freeze, do not zero, on dropped input
 
 Hold the last good pose. One zeroed frame is a violent jolt in a headset.
+
+### Keep the pose receiver allocation-free and off Unity APIs
+
+A UDP receiver at 72-90 Hz is a trap for the main thread. `Split` plus
+`float.Parse` allocates dozens of strings per packet, and `UdpClient.Receive`
+allocates a fresh `byte[]` for every datagram - eventually a GC pause lands as a
+visible hitch. Receive into a reusable buffer, **drain every queued datagram and
+parse only the newest**, and scan the ASCII bytes directly.
+
+Also: the receive thread must not call Unity's `Time.*` or other engine APIs.
+Use `Environment.TickCount` or a `Stopwatch` for its own rate-limiting, and keep
+logging on the main thread where possible. The Interstellar Marines port was
+doing both (per-packet strings and `Time.realtimeSinceStartup` from the receive
+thread) before its 7 Nov cleanup.
 
 ### Haptics are a level, not an event
 

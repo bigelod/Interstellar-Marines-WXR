@@ -22,8 +22,8 @@ using UnityEngine;
 // It used to be one column of nineteen rows at 5.5% of screen height each, which is
 // 1.05 screens tall - so the bottom of it, Close button included, was off the panel and
 // then off the visible area again. The list only grows, so the layout has to be one
-// that scales: two columns at 4.5% fit twenty rows in 54% of the height, inside the 62%
-// the headset actually shows. Scrolling was the alternative and was rejected - dragging
+// that scales: two columns at 4.5% fit twenty-two rows in about 61% of the height,
+// inside the 62% the headset actually shows. Scrolling was the alternative and was rejected - dragging
 // a scrollbar through the runtime's pointer emulation is far worse than clicking a
 // button, and nothing here benefits from being hidden.
 public class VRTuneMenu : MonoBehaviour
@@ -38,7 +38,7 @@ public class VRTuneMenu : MonoBehaviour
     // owner confirmed on 1 Nov that the green HUD sits exactly on the top and bottom
     // edges of the visible area, so the HUD's own scale is a measured proxy for it.
     const float SAFE = 0.62f;
-    const int ROWS_PER_COLUMN = 10;
+    const int ROWS_PER_COLUMN = 11;
 
     // Offered as whole presets rather than two independent width and height rows,
     // because most of the pairs those would let you build are not worth rendering.
@@ -159,6 +159,9 @@ public class VRTuneMenu : MonoBehaviour
         // ---- Column B: what it looks like and what it costs ----
         y = y0;
         ResolutionRow(R(colBx, y, colW, rowH)); y += rowH;
+
+        // Low-res world, full-res window/HUD. 0.5 is 640x480 inside 1280x960.
+        VRManager.worldRenderScale = Row(R(colBx, y, colW, rowH), "World res", VRManager.worldRenderScale, 0.05f, 0.25f, 1.00f, "world_render_scale", "0.00"); y += rowH;
 
         float hs = VRGlassAnchor.GetHudScale();
         float hs2 = Row(R(colBx, y, colW, rowH), "HUD scale", hs, 0.02f, 0.20f, 1.00f, "hudScale", "0.00"); y += rowH;

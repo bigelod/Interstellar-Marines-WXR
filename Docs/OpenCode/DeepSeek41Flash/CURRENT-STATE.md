@@ -4,58 +4,73 @@ This file is a snapshot, not a history. For how the code got here, read the
 archived `Docs/MetaAI/`; for the full audit of the 30 Oct tree, read the
 archived `Docs/ClaudeCode/`.
 
-All source claims are against commit **`17a5f92` "Less motion sickness"**.
+All source claims are against commit **`f593154` "Project transfer to DeepSeek
+V4.1 Flash"**, plus the uncommitted performance/housekeeping work.
 
 ## Repository and build
 
 | Fact | Value | Mark |
 |---|---|---|
 | Branch | `main` | [src] |
-| HEAD | `17a5f92` (7 Nov 2026, 02:32 -0500) | [src] |
-| Commits after `e648e72` | `177dee4`, `e9474a2`, `17a5f92` | [src] |
-| Working tree | **handshake / auto-detection fix + docs reconciliation, uncommitted**; `Docs/general_wxr/PC_INPUT.md` still untracked | [src] |
-| `Docs/` tracked | 23 files | [src] |
-| Build | `dotnet build IMVRMod.csproj -c Release` — **0 errors, 3 warnings** | [build] |
+| HEAD | `f593154` (handshake + docs pass committed) | [src] |
+| Commits after `e648e72` | `177dee4`, `e9474a2`, `17a5f92`, `f593154` | [src] |
+| Working tree | **housekeeping + low-res world scaler + UDP receiver, uncommitted** | [src] |
+| `Docs/` tracked | 29 files (including `PC_INPUT.md`) | [src] |
+| Build | `dotnet build IMVRMod.csproj -c Release` — **0 errors, 0 warnings** (7 Nov housekeeping) | [build] |
 | Engine | Unity **5.6.7**, BepInEx 5, Harmony, `net35`, `LangVersion 3`, x86 | [docs] |
 | Plugin version | `0.3.2` | [src] |
 | Default configuration | `Release`, forced in `Directory.Build.props` | [src] |
 
-Warnings, all cosmetic:
+The October audit had 5 warnings, then 3. The 7 Nov housekeeping removed the
+last three: the unreachable input block, the unused catch variable and the
+unused `hasBase` field. The build is now clean.
 
-| Warning | Where | What |
-|---|---|---|
-| CS0162 | `Patches.cs:278` | Unreachable code after an unconditional `return true` |
-| CS0168 | `XRAPI.cs:113` | Unused `catch (Exception e)` variable |
-| CS0414 | `VRHeadTracker.cs:6` | `hasBase` assigned, never read |
-
-The build is materially healthier than the October audit: it had 5 warnings, then
-3. The two real ones (`targetFovX` / `targetFovY` unused) are gone because
-`screen_fov` now drives them.
-
-### 7 Nov working-tree changes (uncommitted)
+### Committed in `f593154`
 
 - **Handshake completed** in `XRAPI.cs`: `version` and `vr` written
   unconditionally; `TickHandshake` repairs them every 2 s if the runtime wipes
   the directory; `system` is read for headset detection; `flipHands=auto` uses
   it while an explicit `true`/`false` overrides; desktop fallback is `xrtemp`
   next to the DLL; `vr` is deleted on shutdown.
-- **Config** now ships `flipHands=auto`.
-- **Docs updated**: root `README.md`, the `general_wxr` notes, and this set
-  describe the code at `17a5f92` plus the handshake fix. `Docs/ClaudeCode/` and
-  `Docs/MetaAI/` are **archived and deliberately unchanged**.
+- **Docs updated**: root `README.md`, the `general_wxr` notes and this set.
+  `Docs/ClaudeCode/` and `Docs/MetaAI/` are **archived and deliberately
+  unchanged**.
 - **Borderless window** is accepted as handled by the owner's fullscreen
   container, not by mod code.
+
+### Working-tree changes after `f593154` (uncommitted)
+
+- **Config:** `shadow_distance=10`, `world_render_scale=0.5`, and
+  `hud_supersample=1.1` (back to the game default).
+- **Low-res world / full-res HUD** (`VRWorldScaler.cs`): `WorldCamera` renders
+  into a 640x480 target, a depth-0.5 camera blits it, and the HUD cameras stay
+  at 1280x960. Based on the XOPS-WXR composite. The composite camera now clears
+  the backbuffer (the world camera used to be the only Skybox clear) and the
+  game's `CopyToScreenRT` is disabled while the RT is active: it copies the
+  deferred result into `RenderTexture.active`, which **is** the world RT, so it
+  fed the frame back into itself and bloom turned that into a white screen. It
+  is restored on pause and at `world_render_scale=1.0`.
+- **UDP receiver:** reusable receive buffer, socket drain (newest packet wins),
+  allocation-free ASCII parser, `AboveNormal` thread priority, and
+  `Environment.TickCount` instead of Unity `Time.*` on the receive thread.
+- **Periodic work staggered:** post-FX 3 s, HUD safe-area scan 3 s, light sweep
+  4 s, so their allocating `FindObjectsOfType` / `GetComponentsInChildren` calls
+  do not land on one frame.
+- **Housekeeping:** removed the unreachable input block, fixed the logger
+  wiring, deleted dead `VRHUDAnchor`, removed `hasBase`, and dropped the unused
+  haptic amplitude parameter. Build is 0 warnings, 0 errors.
 
 ## What changed since the ClaudeCode audit
 
 `Docs/ClaudeCode/STATUS.md` says "Nothing since `e648e72` has been committed."
-That is no longer true. Three commits landed afterwards:
+That is no longer true. Four commits landed afterwards:
 
 | Commit | Subject | What it actually contains |
 |---|---|---|
 | `177dee4` | Game improvements | The 3 Nov batch: `VRHandInteract`, `VRHeadLamp`, `VRClipGuard`, `VRPostFX`, `VRInputGate`, `VRTuneMenu`, `VRConfigFile`, `VRFovTuner`, wider config, pain overlay, input-gate centralisation |
 | `e9474a2` | Further progress | HUD safe area / supersample wiring, `VRHands`, sync-pixel rewrite, `VRLightTamer`, `VRPainOverlay`, docs update, large config expansion |
-| `17a5f92` | Less motion sickness | **Undocumented in every doc set:** zeroes the sprint-bob scales and the sprint amplitude curve on `RangedWeapon`; changes the default `shadowDistance` from 15 to 10; adds OpenCode to the README credits |
+| `17a5f92` | Less motion sickness | Zeroes the sprint-bob scales and the sprint amplitude curve on `RangedWeapon`; changes the default `shadowDistance` from 15 to 10; adds OpenCode to the README credits |
+| `f593154` | Project transfer to DeepSeek V4.1 Flash | The 7 Nov handshake completion, the README/docs reconciliation, and the OpenCode notes. The performance/housekeeping work is **after** this commit and still uncommitted |
 
 The latest commit is the one to read before assuming the docs describe HEAD. It
 does not.
@@ -102,19 +117,15 @@ the 2 s poll reverts them.
 | `occluder_scale` | `1.0` | `1.0` | `HelmetOccluder`; layer 14, cannot affect the world |
 | `screen_fov` | `90` | `104.5` | Runtime paint angle, **not** the camera FOV (98 vertical) |
 | `render_width` / `render_height` | `1280` / `960` | same | Applied at startup and on spawn; `0` opts out |
-| `hud_supersample` | `2.0` | `2.0` | `HUDCamera.hudScale`; game default is 1.1 |
-| `shadow_distance` | `15` | **`10`** | **Mismatch:** the newest commit lowered the code default, but `config.txt` still says 15, so 15 wins |
+| `world_render_scale` | `0.5` | `0.5` | 3D world renders at 640x480 inside the 1280x960 window; HUD stays full-res. `1.0` disables |
+| `hud_supersample` | `1.1` | `1.1` | `HUDCamera.hudScale`; game default. The 0.5 world scale already doubles relative HUD sharpness |
+| `shadow_distance` | `10` | `10` | Matches the code default now; only the helmet lamp casts |
 | `shadow_resolution` | `0` | `0` | 0=Low … 3=VeryHigh; only the helmet lamp casts |
 | `sync_pixel_size` | `10` | `10` | Framebuffer pixels; GL rect, not a quad |
 
-Two things worth noticing:
+One thing worth noticing:
 
-1. **`shadow_distance` is inconsistent.** `17a5f92` changed
-   `VRManager.shadowDistance` from 15 to 10, but `config.txt` still ships
-   `shadow_distance=15`, so the change has no effect on the owner's device. Either
-   the config should move to 10 or the commit message should not imply a
-   behavioural change.
-2. **`hudScale` has two defaults.** `VRGlassAnchor`'s fallback is `0.62`, but the
+1. **`hudScale` has two defaults.** `VRGlassAnchor`'s fallback is `0.62`, but the
    shipped config is `0.60`. The config wins; the code fallback only matters if
    the file is missing.
 
@@ -148,12 +159,14 @@ occasionally disagree with each other.
 |---|---|
 | Interaction ray from the hand | Rewritten 3 Nov; brackets, hint and Use all come off the dominant hand. Needs a device pass |
 | Shadows | `VRLightTamer` sweep + helmet lamp only; `shadow_resolution=Low`. Needs visual check |
-| HUD text supersampling | `hud_supersample=2.0`; cost and legibility need a headset check |
+| HUD text supersampling | `hud_supersample=1.1`; cost and legibility need a headset check against the 0.5 world scale |
 | Haptics | Ammo-drop (6 frames) and weapon-switch (10 frames); never felt on device |
 | Compass follows head yaw | Four-argument `UpdateTicks` invocation; `UnityEngine.UI` was not in `Libs/` for a compile-time check |
 | Visor-open hides HUD | `VRGlassAnchor` restores the original parent when the visor opens; needs re-test |
 | Menus / lobby in VR | Still handled by leaving VR (`MODE_VR=0`), not by making the menu cameras VR-aware |
 | Borderless window | **Accepted** — the owner runs fullscreen; no chrome-stripping code is shipped |
+| Low-res world / full-res HUD | Written 7 Nov; `world_render_scale=0.5` with a depth-0.5 composite. **First device report: runaway white glow.** Cause and fix are in the working tree (`CopyToScreenRT` self-copy + missing backbuffer clear); needs a re-check for camera ordering and HUD sharpness |
+| UDP receiver | Rewritten 7 Nov: drain + allocation-free parser. Needs a device check for packet pacing and tracking feel |
 | Handshake watchdog | Written 7 Nov; `version`/`vr` are repaired every 2 s after a runtime wipe. Needs a device check |
 | Headset auto-detection | Written 7 Nov; `system` maps `EUREKA`/`PANTHER`/`HOLLYWOOD`/`SEACLIFF`, and `flipHands=auto` follows it. Needs a device check |
 
@@ -221,6 +234,13 @@ audit time. `Docs/ClaudeCode/` and `Docs/MetaAI/` were left archived.
 - Whether `VRHudSafeArea`'s skip list spares every world-space marker in every
   level. It skips by substring (`waypoint`, `marker`, `objective`, `tracker`,
   `world`, `nametag`), which is a heuristic.
+- Whether `VRWorldScaler`'s depth-0.5 blit lands before every HUD camera on the
+  device, and whether `CAM Camera` / `HelmetCamera` still render at full window
+  resolution in gameplay. A `hud_tree.txt` dump plus a screenshot settles it.
+- Whether the new parser's packet mapping matches a real Quest 3 capture. The
+  allocation-free parser was checked against the sample packet in
+  `Docs/general_wxr/SixDOFinatorCalibration/SamplePoseData.txt`; the field
+  mapping is unchanged from the old parser.
 - The final feel of the interaction ray, haptics, shadows and HUD supersampling.
 - Any frame-time measurement. Per `general_wxr/CLAUDE.md`, that belongs on-device,
   not in the mod.

@@ -53,8 +53,9 @@ public static class VRHudSafeArea
         if (target >= 0.999f && containers.Count == 0) return;
 
         // Canvases are rebuilt per level and HUD widgets spawn at runtime, so rescan
-        // periodically rather than once. Cheap: a couple of GetComponentsInChildren every 2s.
-        if (Time.realtimeSinceStartup - lastScanTime > 2f)
+        // periodically rather than once. 3s keeps it off the same frame as the other
+        // periodic scans; GetComponentsInChildren allocates, so it is not free.
+        if (Time.realtimeSinceStartup - lastScanTime > 3f)
         {
             lastScanTime = Time.realtimeSinceStartup;
             Scan();
@@ -122,7 +123,7 @@ public static class VRHudSafeArea
 
     static RectTransform GetOrCreateContainer(RectTransform canvasRT)
     {
-        // Reuse an existing container - this runs every 2s and must not stack containers
+        // Reuse an existing container - this runs every 3s and must not stack containers
         for (int i = 0; i < canvasRT.childCount; i++)
         {
             Transform c = canvasRT.GetChild(i);
@@ -176,7 +177,7 @@ public static class VRHudSafeArea
 
     static void LogOnce(string msg)
     {
-        // First scan only, so a 2s rescan does not spam the log. Verbose-gated after that.
+        // First scan only, so a 3s rescan does not spam the log. Verbose-gated after that.
         if (loggedOnce && !VRManagerState.verboseDebug) return;
         try { VRManagerLogger.LogInfo(msg); } catch { }
     }

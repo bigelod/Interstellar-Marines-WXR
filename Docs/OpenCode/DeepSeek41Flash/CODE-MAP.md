@@ -22,6 +22,7 @@ commit wins, because that audit predates three commits.
 | `VRLightTamer.cs` | Silences every light's shadows except the helmet lamp |
 | `VRHeadLamp.cs` | Owns one helmet lamp parented to the head camera |
 | `VRClipGuard.cs` | Forces occlusion culling off while the camera is inside geometry; applies far clip and fog |
+| `VRWorldScaler.cs` | Renders `WorldCamera` into a low-res RT and blits it full-screen; the HUD cameras stay at window resolution |
 | `VRPainOverlay.cs` | Suppresses the game's per-camera red flash and draws peripheral bands once |
 | `SyncPixelQuad.cs` | Global overlay camera + immediate-mode `GL` red sync pixel |
 | `VRConfigFile.cs` | Writes one key back to `config.txt`, preserving comments and duplicates |
@@ -43,13 +44,15 @@ commit wins, because that audit predates three commits.
    root, then the DLL directory. [src]
 5. `ParseConfig()` — reads every key, then `VRInput.SetConfig(deadzone)`. [src]
 6. `ApplyRenderResolution()` — one `Screen.SetResolution` call if the current
-   size differs. This is **not** borderless. [src]
+   size differs. The owner runs fullscreen in the container, so there is no
+   borderless pass. [src]
 7. `XRAPI.XR_Init()` — resolves the handshake directory, writes `version` and
    `vr`, reads `system` if present, then opens the receive and send sockets. [src]
 8. `Harmony.PatchAll()`.
 9. `SyncPixelQuad.Ensure()` — creates the `DontDestroyOnLoad` overlay camera
    once. [src]
-10. Creates `IMVR_InputRunner` with `VRInputRunner` and `VRTuneMenu`. [src]
+10. `VRWorldScaler.Ensure()` — creates the depth-0.5 blit camera once. [src]
+11. Creates `IMVR_InputRunner` with `VRInputRunner` and `VRTuneMenu`. [src]
 
 ## Frame order
 
@@ -58,8 +61,8 @@ Update (IMVR_InputRunner)
   VRManager.PollConfig            every 2 s: re-read config.txt
   XRAPI.TickHandshake             every 2 s: repair version/vr, read system
   VRFovTuner.Update               arrows while paused; writes config back
-  VRPostFX.Enforce                every 2 s: AA/TAA, AO, DoF off
-  VRLightTamer.Enforce            every 2 s: only helmet lamp casts shadows
+  VRPostFX.Enforce                every 3 s: AA/TAA, AO, DoF off
+  VRLightTamer.Enforce            every 4 s: only helmet lamp casts shadows
   VRPainOverlay.Enforce           clamp the game's red flash to alpha 0
   VRInput.UpdateFrame
       read XrApi state
@@ -68,6 +71,7 @@ Update (IMVR_InputRunner)
       slot cycling / recentre / Use edge
       XRAPI.UpdateVRModeFromGameState  -> MODE_VR + outbound 7278 packet
       XRAPI.TickHaptics                -> decay after the send
+  VRWorldScaler.Tick           enable the low-res compositor only in VR gameplay
 
 HUDCamera.Update postfix
   only when inVR: distort = 0; hudScale = hud_supersample (on change)
@@ -78,6 +82,7 @@ LateUpdate
       camera.localPosition = base + eye offset + clamped lean
       camera.localRotation = baseLocalRot * headRot
       VRClipGuard.Apply(cam)
+      VRWorldScaler.Apply(cam)  -> WorldCamera.targetTexture = low-res RT
   VRWeapon.LateUpdate
       ammo-drop haptic
       place model from VRHands.GetDominantPose
@@ -87,6 +92,10 @@ LateUpdate
       glue glass mesh to head camera when visor Closed
       restore original parent when visor Open
       do NOT scale HUD UI Root
+
+OnRenderImage (VRWorldScaler's depth-0.5 camera)
+  clear to black, then Graphics.Blit low-res WorldCamera RT -> Unity's destination,
+  before the HUD cameras; never reads the destination it writes
 
 OnPostRender (SyncPixelQuad's depth-1000 camera)
   VRPainOverlay.Draw   peripheral bands, once per frame
@@ -135,9 +144,14 @@ flicker. Treat it as dead code. [src]
   - Deletes `vr` on clean shutdown; leaves `version`.
   [src] — full detail and the device checklist are in
   [HANDSHAKE.md](HANDSHAKE.md).
-- Receive thread blocks with a 500 ms timeout. Parser needs at least 30 tokens,
-  skips a leading `client*`, reads the 28-float layout, frame id, 19-char bool
-  string and HMD name. Trailing tokens are ignored. [src]
+- Receive thread blocks with a 500 ms timeout. It receives into a reusable
+  `byte[2048]` and **drains the socket, parsing only the newest packet**. The
+  parser is allocation-free: it scans ASCII bytes for 28 floats, the frame id
+  and the 19 bool characters instead of `Split` + `float.Parse`. It skips a
+  leading `client*`, ignores trailing tokens and the HMD name. [src]
+- The receive thread uses `Environment.TickCount`, not Unity `Time.*`, and runs
+  at `AboveNormal` priority. A malformed packet is skipped, not treated as a
+  fatal socket error. [src]
 - **Normalisation and handedness happen once, at ingest**, in
   `XRAPI.ToUnity`: quaternion normalised unconditionally, component flip
   `(-x,-y,z,w)`; vector `z` negated. Do not repeat it in consumers. [src]
@@ -220,7 +234,14 @@ no error:
 `HUDCamera.hudScale` is a **supersample factor**, not a size. The game sizes both
 HUD render targets at `Screen * hudScale` and divides the `CanvasScaler`
 reference resolution by the same number. The mod used to pin it to 1.0, which was
-below the game's own 1.1 default; it now follows `hud_supersample`, default 2.0.
+below the game's own 1.1 default; it now follows `hud_supersample`, default 1.1.
+With `world_render_scale=0.5`, that already gives the HUD roughly twice the world
+resolution; 2.0 is available but costs 4x the HUD fill.
+
+The physical visor's dirty-glass texture is **deliberately removed** in the
+near-clip postfix (`mainTexture = null`, colour alpha 0.12). The owner confirmed
+it is only a dirty plastic/glass look and is not wanted in VR. Do not "restore"
+it; the faint alpha tint is the remaining glass cue.
 
 ## Presentation and comfort
 
@@ -250,6 +271,18 @@ below the game's own 1.1 default; it now follows `hud_supersample`, default 2.0.
   config-gated; `far_clip` is the knob.
 - **Resolution:** `Screen.SetResolution(render_width, render_height,
   Screen.fullScreen)` at startup and on spawn. `render_width=0` opts out.
+- **World scaler:** `VRWorldScaler` sets `WorldCamera.targetTexture` to a
+  `Screen * world_render_scale` RT (default 0.5 = 640x480 in a 1280x960
+  window). A depth-0.5 camera clears to black, then blits the RT to screen from
+  `OnRenderImage` before `HelmetCamera` / `CAM Camera` at depth 1. The HUD
+  cameras keep using `Screen` dimensions, so the visor and text stay
+  full-resolution. `1.0` restores direct rendering. The game's
+  `CopyToScreenRT` is disabled while the RT is active: it copies into
+  `RenderTexture.active`, which is the RT, so it would feed the frame back into
+  itself; it is restored on pause and at `1.0`.
+- **Staggered periodic work:** config poll 2 s, post-FX 3 s, HUD safe-area
+  scan 3 s, light sweep 4 s. `FindObjectsOfType` and `GetComponentsInChildren`
+  allocate, so keeping them off the same frame avoids a recurring spike.
 - **Window:** the owner runs the game fullscreen in the WinlatorXR container, so
   no borderless/chrome-stripping code is shipped. `Screen.SetResolution` is only
   a resolution knob; revisit only if a capture shows chrome over the sync pixel.
@@ -319,3 +352,6 @@ below the game's own 1.1 default; it now follows `hud_supersample`, default 2.0.
     gamma correction corrupts the frame id the runtime reads.
 12. **Do not "fix" the helmet by removing it.** The bent-glass visor is the
     game's identity.
+13. **Keep `world_render_scale=1.0` as the rollback.** If the low-res composite
+    ever draws over the HUD or leaves a stale frame, 1.0 restores direct
+    `WorldCamera` rendering without a rebuild.

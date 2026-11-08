@@ -113,24 +113,33 @@ screen_fov=90
 render_width=1280
 render_height=960
 
+# Internal resolution for the 3D WORLD ONLY. The window and the HUD stay at
+# render_width x render_height, so the visor text keeps full resolution while the
+# expensive world pass renders fewer pixels. 0.5 = a 640x480 world in a 1280x960
+# window. This is the XOPS-WXR split: low-res background, full-res UI.
+# Lower is a direct fill-rate win. 1.0 disables the mechanism entirely.
+# Re-read every 2s, so tune it live.
+world_render_scale=0.5
+
 # Supersampling for the visor HUD's own render target, written into
 # HUDCamera.hudScale. That field is NOT a screen-size knob despite the name: the
 # game sizes its two HUD render textures at Screen * hudScale AND divides the
 # canvas scaler's 3840x2160 reference resolution by the same number, so raising it
 # draws the same HUD, at the same apparent size, into proportionally more pixels.
 # It is the one lever that sharpens the HUD text without changing its fit.
-# 1.1 is the game's own default and the mod used to force 1.0, which is why the
-# text read as low-res in the headset. 2.0 doubles the linear resolution.
-# Cost: two render targets at 2x and two full-screen blits over 4x the pixels -
-# wind this back first if the frame rate is short.
-hud_supersample=2.0
+# 1.1 is the game's own default. With world_render_scale=0.5 the HUD target is
+# already about twice the world resolution, which is the crisp-text effect without
+# the cost of 2.0. 2.0 doubles the linear resolution but costs two render targets
+# at 2x and two full-screen blits over 4x the pixels - raise it only if the text
+# still reads soft on device.
+hud_supersample=1.1
 
 # Shadows. Only the player's helmet lamp casts any at all - every other light in
 # the level has its shadow casting switched off (VRLightTamer), because real-time
 # shadows are the most expensive thing a light can do and the torch is the only one
 # that tells you anything. These two govern that single light.
 # shadow_resolution: 0=Low, 1=Medium, 2=High, 3=VeryHigh.
-shadow_distance=15
+shadow_distance=10
 shadow_resolution=0
 
 # Edge length of the red sync patch in the top-left corner, in framebuffer pixels.

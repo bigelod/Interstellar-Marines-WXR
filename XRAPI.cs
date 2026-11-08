@@ -52,7 +52,12 @@ public static class XRAPI
     static Vector3 recenterOrigin = Vector3.zero;
 
     static int rxTimeouts = 0;
-    static float lastRxTimeoutLog = -999f;
+    static int lastRxTimeoutTick = -100000;
+    // The receive thread parses into these buffers; no per-packet allocation, so a
+    // 72-90 Hz stream cannot trigger a GC pause on the main thread.
+    static readonly byte[] recvBuffer = new byte[2048];
+    static readonly float[] packetFloats = new float[28];
+    static bool parseOk;
 
     // Handshake files. The runtime wipes Z:/tmp/xr at its own startup, so `version`
     // must be written unconditionally and re-checked while the session runs. The old
@@ -97,14 +102,20 @@ public static class XRAPI
         {
             foreach (int port in PORTS)
             {
-                try { if (recvThread != null) recvThread.Abort(); } catch (Exception e) { }
+                try { if (recvThread != null) recvThread.Abort(); } catch { }
 
                 try
                 {
                     client = new UdpClient(port);
                     client.Client.ReceiveTimeout = 500;
+                    // Absorb a short burst instead of dropping it. On a standalone
+                    // device the receiver can be descheduled while the GPU stalls.
+                    try { client.Client.ReceiveBufferSize = 65536; } catch { }
                     recvThread = new Thread(RecvLoopParam);
                     recvThread.IsBackground = true;
+                    // Above Normal so a frame-time spike does not leave a queue of
+                    // stale packets behind; the thread only parses and copies a pose.
+                    try { recvThread.Priority = System.Threading.ThreadPriority.AboveNormal; } catch { }
                     recvThread.Start(port);
                     VRManagerLogger.LogInfo("[IMVR] UDP Rx listening on " + port);
                     latest.headRot = Quaternion.identity;
@@ -295,17 +306,41 @@ public static class XRAPI
 
     static void RecvLoop(int port)
     {
-        IPEndPoint any = new IPEndPoint(IPAddress.Any, 0);
-        while (client != null && any != null && VRManagerState.rxTxFailCount <= VRManagerState.rxTxFailMaxRetry)
+        while (client != null && VRManagerState.rxTxFailCount <= VRManagerState.rxTxFailMaxRetry)
         {
             try
             {
-                byte[] data = client.Receive(ref any);
-                if (data == null || data.Length == 0) continue;
+                // Receive into a reusable buffer. UdpClient.Receive allocates a new
+                // byte[] for every datagram; at 72-90 Hz that is a steady GC load.
+                int n = client.Client.Receive(recvBuffer);
+                if (n <= 0) continue;
+
+                // Drain everything already queued and keep only the newest packet.
+                // Parsing one-per-frame builds a queue and acts on staler poses.
+                try
+                {
+                    int guard = 0;
+                    while (client != null && client.Available > 0 && guard++ < 32)
+                    {
+                        int n2 = client.Client.Receive(recvBuffer);
+                        if (n2 > 0) n = n2;
+                    }
+                }
+                catch { }
+
                 VRManagerState.rxTxFailCount = 0;
                 rxTimeouts = 0;
-                string s = Encoding.ASCII.GetString(data).Trim();
-                ParseString(s);
+
+                // A malformed packet must not tear down the socket. Parsing is
+                // allocation-free and should not throw; if it does, skip this packet.
+                try { ParsePacket(recvBuffer, n); }
+                catch (Exception pe)
+                {
+                    if (VRManagerState.verboseDebug)
+                    {
+                        try { VRManagerLogger.LogWarn("[IMVR] UDP parse skipped: " + pe.Message); } catch { }
+                    }
+                }
             }
             catch (SocketException)
             {
@@ -314,12 +349,12 @@ public static class XRAPI
                 // the runtime is not sending, by design, while in menus. Logging every
                 // one buried the real signal under 267 identical lines on 1 Nov. Keep the
                 // signal, drop the spam: report at most every 5s, with the count.
+                // Environment.TickCount, not Time.* - this is a background thread.
                 rxTimeouts++;
-                float now = 0f;
-                try { now = Time.realtimeSinceStartup; } catch { }
-                if (now - lastRxTimeoutLog > 5f)
+                int now = Environment.TickCount;
+                if (unchecked(now - lastRxTimeoutTick) > 5000)
                 {
-                    lastRxTimeoutLog = now;
+                    lastRxTimeoutTick = now;
                     VRManagerLogger.LogWarn("[IMVR] UDP Rx: no packets for a while (" + rxTimeouts + " timeouts). Normal if MODE_VR=0; a problem if it persists in gameplay.");
                 }
                 continue;
@@ -431,11 +466,6 @@ public static class XRAPI
 
     public static void SendHapticVibration(int hand, int frames)
     {
-        SendHapticVibration(hand, frames, 1f);
-    }
-
-    public static void SendHapticVibration(int hand, int frames, float amplitude)
-    {
         int f = Mathf.Clamp(frames, 0, 100);
         if (hand == LEFT) leftHapticFrames = Mathf.Max(leftHapticFrames, f);
         else rightHapticFrames = Mathf.Max(rightHapticFrames, f);
@@ -451,63 +481,168 @@ public static class XRAPI
         SendHapticUpdate();
     }
 
-    static void ParseString(string s)
+    // Allocation-free packet parser. The old version split the line into ~30 strings
+    // and called float.Parse on each, which is a steady GC source at 72-90 Hz. This
+    // scans the ASCII bytes in place. It also means the receive thread never touches
+    // Time.* (Unity APIs are not thread-safe), so it cannot stall the main thread.
+    static void ParsePacket(byte[] b, int len)
     {
-        if (string.IsNullOrEmpty(s)) return;
-        string[] parts = s.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 30) return;
-        int idx = 0;
-        if (parts[0].StartsWith("client")) idx = 1;
-        try
-        {
-            Quaternion lQuat = new Quaternion(ParseFloat(parts, idx), ParseFloat(parts, idx + 1), ParseFloat(parts, idx + 2), ParseFloat(parts, idx + 3)); idx += 4;
-            Vector2 lStick = new Vector2(ParseFloat(parts, idx), ParseFloat(parts, idx + 1)); idx += 2;
-            Vector3 lPos = new Vector3(ParseFloat(parts, idx), ParseFloat(parts, idx + 1), ParseFloat(parts, idx + 2)); idx += 3;
-            Quaternion rQuat = new Quaternion(ParseFloat(parts, idx), ParseFloat(parts, idx + 1), ParseFloat(parts, idx + 2), ParseFloat(parts, idx + 3)); idx += 4;
-            Vector2 rStick = new Vector2(ParseFloat(parts, idx), ParseFloat(parts, idx + 1)); idx += 2;
-            Vector3 rPos = new Vector3(ParseFloat(parts, idx), ParseFloat(parts, idx + 1), ParseFloat(parts, idx + 2)); idx += 3;
-            Quaternion hQuat = new Quaternion(ParseFloat(parts, idx), ParseFloat(parts, idx + 1), ParseFloat(parts, idx + 2), ParseFloat(parts, idx + 3)); idx += 4;
-            Vector3 hPos = new Vector3(ParseFloat(parts, idx), ParseFloat(parts, idx + 1), ParseFloat(parts, idx + 2)); idx += 3;
-            float ipd = ParseFloat(parts, idx); idx++;
-            float fovH = ParseFloat(parts, idx); idx++;
-            float fovV = ParseFloat(parts, idx); idx++;
-            int frameId = 0; int.TryParse(parts[idx], out frameId); idx++;
-            string boolStr = "";
-            string hmdType = "META";
-            if (idx < parts.Length) { boolStr = parts[idx]; idx++; if (idx < parts.Length) hmdType = parts[idx]; }
+        if (b == null || len < 32) return;
 
-            bool lGrip = false, lMenu = false, lThumbPress = false, lThumbLeft = false, lThumbRight = false, lThumbUp = false, lThumbDown = false, lTrigger = false, lX = false, lY = false;
-            bool rA = false, rB = false, rGrip = false, rThumbPress = false, rThumbLeft = false, rThumbRight = false, rThumbUp = false, rThumbDown = false, rTrigger = false;
-            if (boolStr.Length >= 19)
-            {
-                lGrip = boolStr[0] == 'T'; lMenu = boolStr[1] == 'T'; lThumbPress = boolStr[2] == 'T'; lThumbLeft = boolStr[3] == 'T'; lThumbRight = boolStr[4] == 'T';
-                lThumbUp = boolStr[5] == 'T'; lThumbDown = boolStr[6] == 'T'; lTrigger = boolStr[7] == 'T'; lX = boolStr[8] == 'T'; lY = boolStr[9] == 'T';
-                rA = boolStr[10] == 'T'; rB = boolStr[11] == 'T'; rGrip = boolStr[12] == 'T'; rThumbPress = boolStr[13] == 'T'; rThumbLeft = boolStr[14] == 'T';
-                rThumbRight = boolStr[15] == 'T'; rThumbUp = boolStr[16] == 'T'; rThumbDown = boolStr[17] == 'T'; rTrigger = boolStr[18] == 'T';
-            }
-            lock (lockObj)
-            {
-                // Normalised and converted to Unity's frame here and nowhere else - see ToUnity above
-                latest.leftRot = ToUnity(lQuat); latest.leftPos = ToUnity(lPos); latest.leftStick = lStick;
-                latest.rightRot = ToUnity(rQuat); latest.rightPos = ToUnity(rPos); latest.rightStick = rStick;
-                latest.headRot = ToUnity(hQuat); latest.headPos = ToUnity(hPos);
-                latest.ipd = ipd; latest.fovH = fovH; latest.fovV = fovV; latest.frameId = frameId;
-                latest.lGrip = lGrip; latest.lMenu = lMenu; latest.lThumbPress = lThumbPress; latest.lThumbLeft = lThumbLeft; latest.lThumbRight = lThumbRight;
-                latest.lThumbUp = lThumbUp; latest.lThumbDown = lThumbDown; latest.lTrigger = lTrigger; latest.lX = lX; latest.lY = lY;
-                latest.rA = rA; latest.rB = rB; latest.rGrip = rGrip; latest.rThumbPress = rThumbPress; latest.rThumbLeft = rThumbLeft;
-                latest.rThumbRight = rThumbRight; latest.rThumbUp = rThumbUp; latest.rThumbDown = rThumbDown; latest.rTrigger = rTrigger;
-                latest.hmdType = hmdType; latest.lastUpdate = Time.realtimeSinceStartup; hasData = true;
-            }
-        }
-        catch (Exception e)
+        int i = 0;
+        SkipSpaces(b, ref i, len);
+        int tokStart = i;
+        while (i < len && b[i] != ' ') i++;
+        if (!IsClientToken(b, tokStart, i - tokStart)) i = tokStart;
+
+        parseOk = true;
+        float[] f = packetFloats;
+        for (int k = 0; k < 28; k++) f[k] = ReadFloat(b, ref i, len);
+        int frameId = ReadInt(b, ref i, len);
+        if (!parseOk) return;
+
+        SkipSpaces(b, ref i, len);
+        int boolStart = i;
+        while (i < len && b[i] != ' ') i++;
+        int boolLen = i - boolStart;
+
+        bool lGrip = BoolAt(b, boolStart, boolLen, 0);
+        bool lMenu = BoolAt(b, boolStart, boolLen, 1);
+        bool lThumbPress = BoolAt(b, boolStart, boolLen, 2);
+        bool lThumbLeft = BoolAt(b, boolStart, boolLen, 3);
+        bool lThumbRight = BoolAt(b, boolStart, boolLen, 4);
+        bool lThumbUp = BoolAt(b, boolStart, boolLen, 5);
+        bool lThumbDown = BoolAt(b, boolStart, boolLen, 6);
+        bool lTrigger = BoolAt(b, boolStart, boolLen, 7);
+        bool lX = BoolAt(b, boolStart, boolLen, 8);
+        bool lY = BoolAt(b, boolStart, boolLen, 9);
+        bool rA = BoolAt(b, boolStart, boolLen, 10);
+        bool rB = BoolAt(b, boolStart, boolLen, 11);
+        bool rGrip = BoolAt(b, boolStart, boolLen, 12);
+        bool rThumbPress = BoolAt(b, boolStart, boolLen, 13);
+        bool rThumbLeft = BoolAt(b, boolStart, boolLen, 14);
+        bool rThumbRight = BoolAt(b, boolStart, boolLen, 15);
+        bool rThumbUp = BoolAt(b, boolStart, boolLen, 16);
+        bool rThumbDown = BoolAt(b, boolStart, boolLen, 17);
+        bool rTrigger = BoolAt(b, boolStart, boolLen, 18);
+
+        lock (lockObj)
         {
-            VRManagerLogger.LogWarn("[IMVR] UDP Rx Parse fail: " + e.Message);
+            // Normalised and converted to Unity's frame here and nowhere else - see ToUnity above
+            latest.leftRot = ToUnity(new Quaternion(f[0], f[1], f[2], f[3]));
+            latest.leftStick = new Vector2(f[4], f[5]);
+            latest.leftPos = ToUnity(new Vector3(f[6], f[7], f[8]));
+            latest.rightRot = ToUnity(new Quaternion(f[9], f[10], f[11], f[12]));
+            latest.rightStick = new Vector2(f[13], f[14]);
+            latest.rightPos = ToUnity(new Vector3(f[15], f[16], f[17]));
+            latest.headRot = ToUnity(new Quaternion(f[18], f[19], f[20], f[21]));
+            latest.headPos = ToUnity(new Vector3(f[22], f[23], f[24]));
+            latest.ipd = f[25]; latest.fovH = f[26]; latest.fovV = f[27]; latest.frameId = frameId;
+            latest.lGrip = lGrip; latest.lMenu = lMenu; latest.lThumbPress = lThumbPress; latest.lThumbLeft = lThumbLeft; latest.lThumbRight = lThumbRight;
+            latest.lThumbUp = lThumbUp; latest.lThumbDown = lThumbDown; latest.lTrigger = lTrigger; latest.lX = lX; latest.lY = lY;
+            latest.rA = rA; latest.rB = rB; latest.rGrip = rGrip; latest.rThumbPress = rThumbPress; latest.rThumbLeft = rThumbLeft;
+            latest.rThumbRight = rThumbRight; latest.rThumbUp = rThumbUp; latest.rThumbDown = rThumbDown; latest.rTrigger = rTrigger;
+            // hmdType is unused; `system` detection owns the headset identity now.
+            latest.hmdType = "";
+            latest.lastUpdate = Environment.TickCount;
+            hasData = true;
         }
     }
 
-    static float ParseFloat(string[] parts, int i)
+    static void SkipSpaces(byte[] b, ref int i, int len)
     {
-        return float.Parse(parts[i], CultureInfo.InvariantCulture);
+        while (i < len && (b[i] == ' ' || b[i] == '\t' || b[i] == '\r' || b[i] == '\n')) i++;
+    }
+
+    static bool IsClientToken(byte[] b, int start, int len)
+    {
+        if (len < 6) return false;
+        return (b[start] | 32) == 'c'
+            && (b[start + 1] | 32) == 'l'
+            && (b[start + 2] | 32) == 'i'
+            && (b[start + 3] | 32) == 'e'
+            && (b[start + 4] | 32) == 'n'
+            && (b[start + 5] | 32) == 't';
+    }
+
+    static bool BoolAt(byte[] b, int start, int len, int idx)
+    {
+        if (idx < 0 || idx >= len) return false;
+        return b[start + idx] == 'T';
+    }
+
+    static float ReadFloat(byte[] b, ref int i, int len)
+    {
+        SkipSpaces(b, ref i, len);
+        if (i >= len) { parseOk = false; return 0f; }
+
+        int sign = 1;
+        if (b[i] == '-') { sign = -1; i++; }
+        else if (b[i] == '+') { i++; }
+
+        double val = 0.0;
+        bool digits = false;
+        while (i < len && b[i] >= '0' && b[i] <= '9')
+        {
+            val = val * 10.0 + (b[i] - '0');
+            i++;
+            digits = true;
+        }
+        if (i < len && b[i] == '.')
+        {
+            i++;
+            double frac = 0.1;
+            while (i < len && b[i] >= '0' && b[i] <= '9')
+            {
+                val += (b[i] - '0') * frac;
+                frac *= 0.1;
+                i++;
+                digits = true;
+            }
+        }
+        if (!digits) { parseOk = false; return 0f; }
+
+        if (i < len && (b[i] == 'e' || b[i] == 'E'))
+        {
+            i++;
+            int esign = 1;
+            if (i < len && (b[i] == '+' || b[i] == '-'))
+            {
+                if (b[i] == '-') esign = -1;
+                i++;
+            }
+            int exp = 0;
+            bool expDigits = false;
+            while (i < len && b[i] >= '0' && b[i] <= '9')
+            {
+                exp = exp * 10 + (b[i] - '0');
+                i++;
+                expDigits = true;
+            }
+            if (expDigits) val *= Math.Pow(10.0, esign * exp);
+        }
+        return (float)(sign * val);
+    }
+
+    static int ReadInt(byte[] b, ref int i, int len)
+    {
+        SkipSpaces(b, ref i, len);
+        if (i >= len) { parseOk = false; return 0; }
+
+        int sign = 1;
+        if (b[i] == '-') { sign = -1; i++; }
+        else if (b[i] == '+') { i++; }
+
+        int val = 0;
+        bool digits = false;
+        while (i < len && b[i] >= '0' && b[i] <= '9')
+        {
+            val = val * 10 + (b[i] - '0');
+            i++;
+            digits = true;
+        }
+        if (!digits) { parseOk = false; return 0; }
+        return sign * val;
     }
 
     // ===== HANDEDNESS + NORMALISATION - DONE ONCE, HERE, AT INGEST =====

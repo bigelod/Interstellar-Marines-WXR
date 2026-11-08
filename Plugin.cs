@@ -84,11 +84,12 @@ public class VRManager : BaseUnityPlugin
     // mainCanvasScaler.referenceResolution to 3840x2160 / hudScale, so raising it renders
     // the same HUD, at the same apparent size, into proportionally more pixels. That is
     // the one lever that makes the HUD text crisper without disturbing its fit.
-    // 1.1 is the game's own default; the mod used to force 1.0, which was slightly WORSE
-    // than stock. 2.0 doubles the linear resolution of the glyphs. The cost is two
-    // render targets at 2x and two full-screen blits over 4x the pixels, so this is the
-    // first thing to wind back if the frame rate is short.
-    public static float hudSupersample = 2.0f;
+    // 1.1 is the game's own default and is the shipped value again. With the world
+    // rendered at 0.5x, the HUD target is already about twice the world resolution,
+    // which is the crisp-text effect we want without the 4x fill of 2.0. The cost at 2.0
+    // is two render targets at 2x and two full-screen blits over 4x the pixels - raise it
+    // only if the text still reads soft on device.
+    public static float hudSupersample = 1.1f;
     // Edge length of the red sync patch, in framebuffer pixels. XRAPI_V0_4_DESC calls for
     // 10x10 at the top-left; it sat at 150 for a long while on the theory that a letterboxed
     // panel might move the corner, and on device that turned out to be an enormous red
@@ -102,6 +103,11 @@ public class VRManager : BaseUnityPlugin
     // 1280x960 is the owner's balance point between legibility and frame rate.
     public static int renderWidth = 1280;
     public static int renderHeight = 960;
+    // Internal resolution multiplier for the 3D world only. The window and the HUD stay
+    // at render_width x render_height, so text stays crisp while the expensive world
+    // pass renders fewer pixels. 0.5 = 640x480 world in a 1280x960 window. 1.0 disables
+    // the mechanism. This is the XOPS-WXR trick: low-res world, full-res UI.
+    public static float worldRenderScale = 0.5f;
     // Shadows. Only the player's helmet lamp casts any (VRLightTamer), and it casts them
     // at this distance and resolution. 0=Low, 1=Medium, 2=High, 3=VeryHigh.
     public static float shadowDistance = 10f;
@@ -128,7 +134,7 @@ public class VRManager : BaseUnityPlugin
         }
         catch { }
 
-        VRManagerLogger.LogInfo = LogDebug;
+        VRManagerLogger.LogDebug = LogDebug;
         VRManagerLogger.LogWarn = LogWarn;
         VRManagerLogger.LogError = LogError;
         VRManagerLogger.LogInfo = LogInfo;
@@ -148,6 +154,7 @@ public class VRManager : BaseUnityPlugin
         harmony.PatchAll();
 
         SyncPixelQuad.Ensure();
+        VRWorldScaler.Ensure();
 
         GameObject runner = new GameObject("IMVR_InputRunner");
         DontDestroyOnLoad(runner);
@@ -300,6 +307,7 @@ public class VRManager : BaseUnityPlugin
                 if(k=="sync_pixel_size" || k=="syncpixelsize"){ int n; if(int.TryParse(v, out n) && n >= 2 && n <= 300) syncPixelSize = n; }
                 if(k=="render_width" || k=="renderwidth"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 320 && n <= 4096))) renderWidth = n; }
                 if(k=="render_height" || k=="renderheight"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 240 && n <= 4096))) renderHeight = n; }
+                if(k=="world_render_scale" || k=="worldscale" || k=="world_scale"){ float f; if(float.TryParse(v, out f) && f >= 0.25f && f <= 1f) worldRenderScale = f; }
                 if(k=="shadow_distance" || k=="shadowdistance"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 200f) shadowDistance = f; }
                 if(k=="shadow_resolution" || k=="shadowresolution"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 3) shadowResolution = n; }
                 if(k=="screen_fov" || k=="screenfov" || k=="vr_fov" || k=="fov"){

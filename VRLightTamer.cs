@@ -12,8 +12,8 @@ using UnityEngine;
 // ===== WHY A SWEEP AND NOT A PATCH =====
 // Lights are spawned by the level, by prefabs, by weapon fire and by ToggleOcclusion
 // turning rooms back on, from a dozen places with no common entry point. A periodic
-// sweep catches all of them for one FindObjectsOfType every two seconds - the same
-// pattern, and the same interval, as VRPostFX.
+// sweep catches all of them for one FindObjectsOfType every four seconds - staggered
+// against VRPostFX and VRHudSafeArea so the scans do not all land on the same frame.
 //
 // It only ever writes Light.shadows. It never touches Light.enabled, which is
 // ToggleOcclusion's business: that component switches whole rooms of lights off when
@@ -30,7 +30,10 @@ public static class VRLightTamer
 
         float now;
         try { now = Time.realtimeSinceStartup; } catch { return; }
-        if (now - lastSweep < 2f) return;
+        // 4s: FindObjectsOfType<Light> scans the whole scene and allocates. Lights spawn
+        // from levels, prefabs and weapon fire, so a sweep is still needed - but it must
+        // not land every 2s alongside the other periodic work.
+        if (now - lastSweep < 4f) return;
         lastSweep = now;
 
         try

@@ -166,7 +166,8 @@ class Helmet_InitFirstPersonCamera_Patch
         // FIXED7: Glued HUD mesh, not camera anchor. NGUI camera stays at UI root (flicker was from moving it).
         // Parent the glass HUD mesh to VR camera, like it was parented to helmet in flat mode.
         try {
-            // FIXED10: Do NOT add VRHUDAnchor to HUDCamera - it fights HUDCamera.Update (HUD UI Root parent) and flickers the texture. Glass mesh is the HUD.
+            // FIXED10: Do NOT add a camera anchor to HUDCamera - it fights HUDCamera.Update
+            // (HUD UI Root parent) and flickers the texture. The glass mesh is the HUD.
         } catch { }
         // FIXED8: Filter was layer==14, but dump shows CH_Marine1pHelmetGlass_HUD is layer 0 (its children meshes are 14). So it was skipped.
         // Fix: match name only, any layer. And attach a per-frame anchor - Glass_HUD has an Animator that can reset parent/transform, so one-time SetParent in Init is not enough.
@@ -274,9 +275,6 @@ class InputManager_IsInput_Patch
         { __result = false; return false; }
         // If VR says this input is false (stick centered, trigger released), also block - don't fall through to original keyboard
         if (VRInput.overridesBool.ContainsKey(name)) { __result = false; return false; }
-        return true;
-        if (VRInput.overridesBool.ContainsKey(name) && (name.Contains("Move") || name.Contains("Strafe")))
-        { bool val = VRInput.overridesBool[name]; if (!val) { __result = false; return false; } }
         return true;
     }
 }
@@ -734,26 +732,6 @@ public class VRGlassAnchor : MonoBehaviour
     }
 }
 
-// VRHUDAnchor - FIXED7: Only for HUDCamera (visor distortion). NGUI camera is NOT anchored - moving it caused flicker (it fights Fake 3D UI Root parent).
-// The glued HUD is the GLASS MESH re-parented to WorldCamera in Helmet patch, not a camera move.
-public class VRHUDAnchor : MonoBehaviour
-{
-    Camera hudCam;
-    void Awake() { hudCam = GetComponent<Camera>(); if (hudCam == null) hudCam = GetComponentInChildren<Camera>(); }
-    void OnPreRender()
-    {
-        if (!VRManagerState.inVR) return;
-        if (Marine.LocalMarine == null) return;
-        if (hudCam == null) return;
-        Camera headCam = null;
-        Camera[] all = Camera.allCameras;
-        if (all != null) for (int i=0;i<all.Length;i++) if (all[i]!=null && all[i].GetComponent<VRHeadTracker>()!=null) { headCam = all[i]; break; }
-        if (headCam == null) return;
-        hudCam.transform.position = headCam.transform.position;
-        hudCam.transform.rotation = headCam.transform.rotation;
-    }
-}
-
 [HarmonyPatch(typeof(GUICompass), "UpdateCompass")]
 class GUICompass_VR_HeadYaw_Patch
 {
@@ -897,6 +875,8 @@ public class VRInputRunner : MonoBehaviour
         try { VRPainOverlay.Enforce(); } catch { }
         try { VRInput.UpdateFrame(); }
         catch (Exception e) { VRManagerLogger.LogError("[IMVR] VRInput Update failed: " + e); }
+        // Enable the low-res world composite only while actually in VR gameplay.
+        try { VRWorldScaler.Tick(); } catch { }
         if (VRManagerState.verboseDebug && Time.frameCount % 60 == 0)
         {
             XRAPI.State s;

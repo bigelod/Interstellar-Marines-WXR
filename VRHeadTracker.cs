@@ -3,9 +3,8 @@ public class VRHeadTracker : MonoBehaviour
 {
     Vector3 baseLocalPos;
     Quaternion baseLocalRot;
-    bool hasBase = false;
     Camera cam;
-    void Awake() { baseLocalPos = transform.localPosition; baseLocalRot = transform.localRotation; hasBase = true; cam = GetComponent<Camera>(); }
+    void Awake() { baseLocalPos = transform.localPosition; baseLocalRot = transform.localRotation; cam = GetComponent<Camera>(); }
     void Start()
     {
         // NearClip Postfix runs after Awake but before Start in most cases, recapture here
@@ -35,5 +34,8 @@ public class VRHeadTracker : MonoBehaviour
         // Last, with the camera at its final position for the frame, so the
         // inside-geometry test is asked about where the eye actually ended up.
         VRClipGuard.Apply(cam);
+        // Render the world at a lower internal resolution while the HUD/visor stays at
+        // the window resolution. See VRWorldScaler.cs.
+        VRWorldScaler.Apply(cam);
     }
 }

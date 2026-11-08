@@ -143,6 +143,7 @@ Each is explained where it is cited.
 | FOV changes have no effect | The field is **degrees**, applied only if greater than 1. Tangents of half-angles are all below 1 and are ignored. |
 | Haptics never stop | Sending 0 does not clear them - the runtime stores only values greater than zero. Haptics are a **duration in frames**, so decay the number you send. |
 | A hand's basis is stretched or asymmetric | A non-unit quaternion. Normalise on ingest, unconditionally; tester packets are often several percent long. |
+| Periodic hitch or stutter while tracking | The UDP receiver allocates per packet (`Split`/`float.Parse`, `UdpClient.Receive`) or calls Unity APIs from its own thread. Reuse buffers, drain to the newest packet, use `Environment.TickCount`. |
 | Values tuned on the desktop are wrong on device | Usually the frame of reference, not precision. A correct value transfers; if it only works where it was found, fix the frame. |
 | Tracking is 25% too fast in a flat-window mode | The window is HMD-attached. Read bool 19 (`IS_IMMERSIVE`) and damp - about 0.8 - when it is set. |
 | On 0.6: buttons and sticks work, no poses | You did not declare any spaces. 0.6 returns poses only for locate pairs you asked for. |

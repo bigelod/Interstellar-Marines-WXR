@@ -36,7 +36,9 @@ public static class VRPostFX
     {
         float now;
         try { now = Time.realtimeSinceStartup; } catch { return; }
-        if (now - lastEnforce < 2f) return;
+        // 3s, not 2s: the video menu does not need faster, and a staggered interval keeps
+        // this sweep from landing on the same frame as the other periodic scans.
+        if (now - lastEnforce < 3f) return;
         lastEnforce = now;
 
         try

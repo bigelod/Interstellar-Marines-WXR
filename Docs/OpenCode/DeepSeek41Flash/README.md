@@ -62,9 +62,9 @@ written unconditionally, a 2 s watchdog repairs them after a runtime wipe, and
 
 The remaining work is device verification and committing. The root `README.md`,
 the `general_wxr` notes and this set were updated on 7 Nov; `Docs/ClaudeCode/`
-and `Docs/MetaAI/` are **archived and deliberately unchanged**. The handshake
-change and the doc pass were still uncommitted at the time of writing, and the
-newest commit's sprint-bob change needed a device pass.
+and `Docs/MetaAI/` are **archived and deliberately unchanged**. The handshake is
+committed in `f593154`; the low-res world scaler and the UDP-receiver rewrite are
+still uncommitted, and all three need a device pass.
 
 ## What is genuinely good
 
@@ -89,6 +89,10 @@ Worth saying, because the next agent will otherwise only see the worklist:
   watchdog repairs them after a runtime wipe, and `system` drives
   `flipHands=auto` with an explicit override. That removes the last manual
   guess from a normal session.
+- **Performance now has a real lever.** `VRWorldScaler` renders the 3D world at
+  half resolution inside the full-resolution window, so the HUD text stays
+  crisp while the expensive pass drops to 640x480. The UDP receiver was also
+  rebuilt to drain queues and parse without allocating.
 
 ## How I would work on this project
 
