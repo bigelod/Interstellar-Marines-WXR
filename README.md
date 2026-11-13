@@ -17,19 +17,19 @@ The port runs the game fullscreen in the container, so no window-chrome handling
 - `MODE_VR=1` in gameplay, `MODE_VR=0` in menus/pause. `0` is deliberate: it stops the unused pose stream, restores the runtime's own mouse control, and leaves immersive presentation so a whole menu is readable at once.
 - Red sync pixel: a **10x10** immediate-mode `GL` rect in the top-left, drawn by the mod's own `DontDestroyOnLoad` overlay camera at depth 1000. No texture, blending, filtering, or gamma correction — the runtime reads the exact red value.
 - HUD: the neon visor is the game's bent-glass pipeline. `VRGlassAnchor` glues the glass mesh to the VR head, preserving its Animator pose; `VRHudSafeArea` shrinks the uGUI content toward the centre; the physical helmet shell is hidden.
-- Performance split: `VRWorldScaler` renders only `WorldCamera` at `world_render_scale` (default 0.5), blits that texture to screen, and leaves `HelmetCamera` / `CAM Camera` at full window resolution. The world pays for 640x480; the HUD text does not.
+- Performance split: `VRWorldScaler` renders only `WorldCamera` at `world_render_scale` (default 0.5), composites that texture to screen as a rollable quad, and leaves `HelmetCamera` / `CAM Camera` at full window resolution. The world pays for 640x480; the HUD text does not.
 - Occlusion: this game's culling switches room lights off (`ToggleOcclusion.OnBecameInvisible`), not just draw calls. `VRClipGuard` forces occlusion culling off while the camera is inside geometry and keeps `far_clip` steady.
 
 ## Features
 
-- **6DOF head tracking** with yaw/pitch/roll; lean clamped to 0.30 m.
+- **6DOF head tracking** with yaw/pitch/roll; lean clamped to 0.30 m. With the low-res composite active, head roll is applied to the **world texture** (XOPS-WXR style): the world and gun roll together and the visor HUD stays upright. `head_roll=0` removes roll; `roll_sign` flips its direction; `hands_roll=1` counter-rotates the gun to stay level with the HUD.
 - **Weapon at the dominant hand**, body-relative orientation, survives level changes.
 - **`flipHands=auto`** — reads `Z:/tmp/xr/system` and maps `EUREKA`/`PANTHER` -> Quest 3, `HOLLYWOOD` -> Quest 2, `SEACLIFF` -> Quest Pro. An explicit `flipHands=true/false` overrides detection.
 - **Haptics on the dominant hand**, driven by the ammo counter: 6 frames when a round is spent, 10 frames on a weapon switch. A dry trigger or a refused shot does not buzz.
 - **Auto 2D/VR switching**: title screen, menus, pause, or no local Marine -> `MODE_VR=0`; in-game -> `MODE_VR=1`.
 - **HUD scaling** via `VRHudSafeArea` (`hudScale`, default 0.60), which moves edge-anchored widgets inward instead of pinning them.
 - **HUD text supersampling** (`hud_supersample`, default 1.1 — the game's own value) via `HUDCamera.hudScale`. The low-res world already makes the HUD about 2x sharper by comparison; 2.0 is available if the text still reads soft.
-- **Low-res world, full-res HUD** (`world_render_scale`, default 0.5): `WorldCamera` renders into a 640x480 target inside the 1280x960 window; a depth-0.5 blit camera composites it, and the HUD/visor cameras still render at the full window resolution. `1.0` disables the mechanism. This is the XOPS-WXR split.
+- **Low-res world, full-res HUD** (`world_render_scale`, default 0.5): `WorldCamera` renders into a 640x480 target inside the 1280x960 window; a depth-0.5 camera composites it (rotated by head roll when enabled), and the HUD/visor cameras still render at the full window resolution. `1.0` disables the mechanism. This is the XOPS-WXR split.
 - **Sync pixel** (10 px) for WinlatorXR frame pacing.
 - **In-headset tuning menu**: pause, click **VR Settings**. Every knob is a row and every change is written back to `config.txt`.
 - **Comfort**: sprint bob removed, head recoil/lurch/visor bob suppressed in VR, blinders-on-damage replaced with peripheral red bands.

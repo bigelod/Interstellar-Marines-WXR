@@ -88,6 +88,21 @@ public static class VRHands
         // the gun down by the chest where the body occludes it.
         pos = headWorld + bodyRot * (p + new Vector3(0f, VRManager.handHeight, 0f));
         rot = bodyRot * r;
+
+        // XOPS leaves the gun inside the rolled world texture (handsRoll=false), so it
+        // rolls with the world. The optional counter-roll cancels the composite rotation
+        // in world space, making the gun stay level with the fixed HUD; the interaction
+        // ray uses this same pose, so the barrel and the ray still agree on screen.
+        if (VRManager.handsRoll && head != null)
+        {
+            float deg = VRWorldScaler.CompositeRollDeg;
+            if (Mathf.Abs(deg) > 0.01f)
+            {
+                Quaternion counter = Quaternion.AngleAxis(-deg, head.transform.forward);
+                pos = head.transform.position + counter * (pos - head.transform.position);
+                rot = counter * rot;
+            }
+        }
         return true;
     }
 }

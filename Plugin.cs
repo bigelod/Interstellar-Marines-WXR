@@ -12,6 +12,11 @@ public static class VRManagerState
     public static int rxTxFailMaxRetry = 5;
     public static bool verboseDebug = false;
 
+    // Head roll about the view axis, in radians. VRHeadTracker removes it from the
+    // camera and VRWorldScaler rotates the low-res world composite by it, so the
+    // world/gun roll while the visor HUD stays fixed. See VRHeadTracker.cs.
+    public static float headRollRad = 0f;
+
     public static GameObject VRRoot;
 }
 
@@ -108,6 +113,19 @@ public class VRManager : BaseUnityPlugin
     // pass renders fewer pixels. 0.5 = 640x480 world in a 1280x960 window. 1.0 disables
     // the mechanism. This is the XOPS-WXR trick: low-res world, full-res UI.
     public static float worldRenderScale = 0.5f;
+    // Head roll. The game camera is rendered with yaw/pitch only, and the low-res world
+    // composite is rotated by the head's roll in VRWorldScaler. The world and the gun
+    // (both in that texture) roll with the head; the visor HUD is drawn afterwards and
+    // stays fixed. This is the XOPS-WXR split, and it needs worldRenderScale < 1.0;
+    // with the scaler off, the camera keeps the full rotation as a fallback.
+    public static bool headRoll = true;
+    // -1 matches XOPS-WXR's default. Flip to +1 if the horizon tilts the wrong way.
+    public static float headRollSign = -1f;
+    // XOPS leaves the hands/gun inside the rolled world texture, so they roll with
+    // the world. Set this true to counter-rotate the gun in world space instead, so it
+    // stays level with the fixed HUD like a viewmodel. XOPS tried that and found the
+    // hands swing on every tilt, so it is off by default.
+    public static bool handsRoll = false;
     // Shadows. Only the player's helmet lamp casts any (VRLightTamer), and it casts them
     // at this distance and resolution. 0=Low, 1=Medium, 2=High, 3=VeryHigh.
     public static float shadowDistance = 10f;
@@ -308,6 +326,9 @@ public class VRManager : BaseUnityPlugin
                 if(k=="render_width" || k=="renderwidth"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 320 && n <= 4096))) renderWidth = n; }
                 if(k=="render_height" || k=="renderheight"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 240 && n <= 4096))) renderHeight = n; }
                 if(k=="world_render_scale" || k=="worldscale" || k=="world_scale"){ float f; if(float.TryParse(v, out f) && f >= 0.25f && f <= 1f) worldRenderScale = f; }
+                if(k=="head_roll" || k=="headroll" || k=="roll"){ headRoll = (v=="true" || v=="1" || v=="yes"); }
+                if(k=="roll_sign" || k=="rollsign"){ float f; if(float.TryParse(v, out f)) headRollSign = (f < 0f) ? -1f : 1f; }
+                if(k=="hands_roll" || k=="hand_roll" || k=="handsroll"){ handsRoll = (v=="true" || v=="1" || v=="yes"); }
                 if(k=="shadow_distance" || k=="shadowdistance"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 200f) shadowDistance = f; }
                 if(k=="shadow_resolution" || k=="shadowresolution"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 3) shadowResolution = n; }
                 if(k=="screen_fov" || k=="screenfov" || k=="vr_fov" || k=="fov"){

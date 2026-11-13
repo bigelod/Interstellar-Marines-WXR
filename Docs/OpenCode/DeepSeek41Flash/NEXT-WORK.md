@@ -69,6 +69,16 @@ Ask for one report covering:
    `CopyToScreenRT suppressed`.
 6. **UDP receiver:** tracking should feel the same or smoother, with no periodic
    hitch. If the log shows `UDP parse skipped`, capture the packet.
+7. **Head roll (XOPS split):** with `world_render_scale=0.5` and `head_roll=1`,
+   tilt your head sideways. The horizon and the gun should roll together while
+   the visor HUD stays upright (XOPS default, `hands_roll=0`). If you wanted the
+   gun to stay level with the HUD instead, set `hands_roll=1` and compare; XOPS
+   found that version swings on every tilt. If the horizon tilts the wrong way,
+   set `roll_sign=+1`. If the hands look glued to the view instead of rolling
+   with the world in `hands_roll=0`, check that the low-res composite is
+   actually active (`world_render_scale` below 1.0) and that the log shows the
+   world RT. With `world_render_scale=1.0`, head roll falls back to the camera
+   and the HUD rolls with it.
 
 If it misbehaves, bisect in this order: handshake (`version`/`vr`/`system`) →
 world scaler (`world_render_scale` 1.0) → UDP parser (revert to string parser) →

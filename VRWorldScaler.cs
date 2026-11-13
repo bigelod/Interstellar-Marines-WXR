@@ -43,6 +43,19 @@ public static class VRWorldScaler
 
     public static RenderTexture WorldRT { get { return rt; } }
 
+    // Screen-space roll applied to the world composite, in degrees. VRHeadTracker strips
+    // this from the camera and stores the head's roll; the world texture is rotated here
+    // so the world and the gun (rendered into it) roll while the HUD, drawn afterwards,
+    // stays fixed. headRollSign flips the direction on device.
+    public static float CompositeRollDeg
+    {
+        get
+        {
+            if (!VRManager.headRoll) return 0f;
+            return VRManagerState.headRollRad * Mathf.Rad2Deg * VRManager.headRollSign;
+        }
+    }
+
     public static void Ensure()
     {
         if (blitCam != null) return;
@@ -210,18 +223,88 @@ public static class VRWorldScaler
     }
 }
 
-// The blit itself. This camera owns no scene objects; it clears the screen and then
-// replaces it with the low-res world. OnRenderImage is used rather than OnPostRender so
-// the destination buffer is Unity's own, not whatever RenderTexture.active happens to be
-// at the end of the camera render - the same trap CopyToScreenRT fell into.
+// The blit itself. The world is drawn as a textured quad so the composite can be
+// rolled by the head: rotating the quad is the Unity equivalent of XOPS-WXR rotating
+// the presented 640x480 game sprite in Present. The camera clears to black first, so
+// the corners opened up by the rotation are black, not stale frame.
 public class VRWorldBlit : MonoBehaviour
 {
-    void OnRenderImage(RenderTexture source, RenderTexture destination)
+    Material mat;
+
+    void Awake()
+    {
+        // Hidden/BlitCopy is the material Graphics.Blit itself uses: opaque, Cull Off,
+        // ZTest Always, and guaranteed to be present in a player build. Unlit/Texture is
+        // the fallback for a stripped build; Sprites/Default is the last resort.
+        Shader s = Shader.Find("Hidden/BlitCopy");
+        if (s == null) s = Shader.Find("Unlit/Texture");
+        if (s == null) s = Shader.Find("Sprites/Default");
+        if (s != null)
+        {
+            mat = new Material(s);
+            mat.hideFlags = HideFlags.HideAndDontSave;
+            try { VRManagerLogger.LogInfo("[IMVR] World scaler blit shader: " + s.name); } catch { }
+        }
+        else
+        {
+            try { VRManagerLogger.LogWarn("[IMVR] World scaler: no blit shader found"); } catch { }
+        }
+    }
+
+    void OnPostRender()
     {
         RenderTexture src = VRWorldScaler.WorldRT;
         if (src == null) return;
         // Never read from the texture we are writing to. That is a feedback loop, not a copy.
-        if (destination == src) return;
-        Graphics.Blit(src, destination);
+        if (RenderTexture.active == src) return;
+
+        float roll = VRWorldScaler.CompositeRollDeg;
+        if (Mathf.Abs(roll) < 0.05f || mat == null)
+        {
+            Graphics.Blit(src, (RenderTexture)null);
+            return;
+        }
+
+        // Rotate the world image about the screen centre with immediate-mode GL. The
+        // camera itself has no roll; this is what puts it back on the world only,
+        // leaving the HUD cameras upright. This is the same GL path SyncPixelQuad uses,
+        // so it does not depend on any RenderTexture.active state left by the game.
+        mat.mainTexture = src;
+        mat.SetPass(0);
+        GL.Clear(true, true, Color.black);
+
+        float w = Screen.width;
+        float h = Screen.height;
+        GL.PushMatrix();
+        GL.LoadPixelMatrix(0f, w, 0f, h);
+        GL.MultMatrix(Matrix4x4.TRS(
+            new Vector3(w * 0.5f, h * 0.5f, 0f),
+            Quaternion.Euler(0f, 0f, roll),
+            Vector3.one));
+        DrawQuad(w * 0.5f, h * 0.5f, false);
+        // Back-face order too: Unlit/Texture culls, and we do not want the image to
+        // disappear if the fallback shader's winding differs from BlitCopy's.
+        DrawQuad(w * 0.5f, h * 0.5f, true);
+        GL.PopMatrix();
+    }
+
+    static void DrawQuad(float hw, float hh, bool reverse)
+    {
+        GL.Begin(GL.QUADS);
+        if (!reverse)
+        {
+            GL.TexCoord2(0f, 0f); GL.Vertex3(-hw, -hh, 0f);
+            GL.TexCoord2(1f, 0f); GL.Vertex3( hw, -hh, 0f);
+            GL.TexCoord2(1f, 1f); GL.Vertex3( hw,  hh, 0f);
+            GL.TexCoord2(0f, 1f); GL.Vertex3(-hw,  hh, 0f);
+        }
+        else
+        {
+            GL.TexCoord2(0f, 1f); GL.Vertex3(-hw,  hh, 0f);
+            GL.TexCoord2(1f, 1f); GL.Vertex3( hw,  hh, 0f);
+            GL.TexCoord2(1f, 0f); GL.Vertex3( hw, -hh, 0f);
+            GL.TexCoord2(0f, 0f); GL.Vertex3(-hw, -hh, 0f);
+        }
+        GL.End();
     }
 }

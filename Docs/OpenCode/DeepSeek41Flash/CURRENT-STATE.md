@@ -50,6 +50,15 @@ unused `hasBase` field. The build is now clean.
   deferred result into `RenderTexture.active`, which **is** the world RT, so it
   fed the frame back into itself and bloom turned that into a white screen. It
   is restored on pause and at `world_render_scale=1.0`.
+- **Head roll** (`VRHeadTracker` + `VRWorldScaler`): when the low-res composite
+  is active, the camera is given yaw/pitch only. The tracked roll is stored and
+  the world texture is rotated as a 2D quad at composite time. The world and
+  the gun (which is rendered into that texture) roll together; the visor HUD
+  and screen-space UI are rendered afterwards and stay fixed. This is the
+  XOPS-WXR split. `head_roll=0` removes roll entirely; `roll_sign` flips the
+  direction; `hands_roll=1` counter-rotates the gun so it stays level with the
+  HUD. With `world_render_scale=1.0` the camera keeps its full rotation as the
+  fallback.
 - **UDP receiver:** reusable receive buffer, socket drain (newest packet wins),
   allocation-free ASCII parser, `AboveNormal` thread priority, and
   `Environment.TickCount` instead of Unity `Time.*` on the receive thread.
@@ -118,6 +127,9 @@ the 2 s poll reverts them.
 | `screen_fov` | `90` | `104.5` | Runtime paint angle, **not** the camera FOV (98 vertical) |
 | `render_width` / `render_height` | `1280` / `960` | same | Applied at startup and on spawn; `0` opts out |
 | `world_render_scale` | `0.5` | `0.5` | 3D world renders at 640x480 inside the 1280x960 window; HUD stays full-res. `1.0` disables |
+| `head_roll` | `1` | `true` | XOPS-style roll: the camera is yaw/pitch only and the world composite is rotated, so the world/gun roll and the HUD stays fixed. Requires `world_render_scale < 1.0`; `0` removes head roll |
+| `roll_sign` | `-1` | `-1` | Flips the composite roll direction. `-1` matches XOPS; use `+1` if the horizon tilts the wrong way |
+| `hands_roll` | `0` | `false` | `0` = XOPS: the gun is in the rolled world texture and rolls with the world. `1` = counter-rotate the gun so it stays level with the fixed HUD |
 | `hud_supersample` | `1.1` | `1.1` | `HUDCamera.hudScale`; game default. The 0.5 world scale already doubles relative HUD sharpness |
 | `shadow_distance` | `10` | `10` | Matches the code default now; only the helmet lamp casts |
 | `shadow_resolution` | `0` | `0` | 0=Low … 3=VeryHigh; only the helmet lamp casts |

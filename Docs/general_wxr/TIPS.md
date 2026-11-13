@@ -320,13 +320,31 @@ text HUD is drawn afterwards **at the window's real resolution**. The world pays
 The same split works in Unity without touching the game's HUD pipeline:
 
 - point the world camera's `targetTexture` at `Screen * world_render_scale`;
-- add a depth-between camera with `clearFlags = Nothing`, `cullingMask = 0` and
-  `Graphics.Blit` the low-res target to the screen;
+- add a depth-between camera that **clears to black**, has `cullingMask = 0`, and draws
+  the low-res target as a textured quad - `Graphics.Blit` for the plain copy, or a
+  rotated quad when head roll belongs on the world only;
 - leave the HUD/visor cameras on `Screen`, so they still render at full resolution.
 
-Expose the scale (0.5 is 640x480 inside 1280x960) and keep `1.0` as the rollback. Every
-extra full-screen pass has a cost, so measure the net win on device rather than assuming
-it.
+Two traps learned the hard way in Interstellar Marines:
+
+- The world camera was the only camera clearing the screen. Once it renders to a
+  texture, the composite camera **must** clear, or later screen-space effects start
+  from the previous frame and accumulate.
+- A game-side deferred screen copy (here `CopyToScreenRT`) may blit into
+  `RenderTexture.active`, which **is** the camera's `targetTexture` once it is set.
+  That reads and writes the same RT every frame; bloom turns it into a white screen.
+  Disable that component while the RT is active and restore it on the rollback path.
+
+If the game only has yaw/pitch camera control, head roll can be applied as a **2D
+rotation of this world texture** at present time. The HUD drawn afterwards stays fixed,
+and 3D hands/weapons rendered into the world texture roll with it. Do not also roll the
+camera, and do not counter-rotate the hands against the texture: that glues them to the
+view and makes them swing on every tilt. XOPS-WXR settles this: the sprite rolls, the
+hands roll with it, the 2D HUD does not.
+
+Expose the scale (0.5 is 640x480 inside 1280x960), a roll sign, and keep `1.0` as the
+rollback. Every extra full-screen pass has a cost, so measure the net win on device
+rather than assuming it.
 
 ### Controller poses arrive upside down on some headsets - ship the override
 

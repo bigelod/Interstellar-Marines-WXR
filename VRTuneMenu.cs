@@ -156,6 +156,12 @@ public class VRTuneMenu : MonoBehaviour
         VRManager.lightHeight = Row(R(colAx, y, colW, rowH), "Lamp height", VRManager.lightHeight, 0.02f, -0.30f, 0.60f, "light_height", "0.00"); y += rowH;
         VRManager.lightForward = Row(R(colAx, y, colW, rowH), "Lamp forward", VRManager.lightForward, 0.02f, -0.30f, 0.60f, "light_forward", "0.00"); y += rowH;
 
+        // XOPS-style head roll: -1 / +1 flips the world composite's rotation. It toggles
+        // rather than slides because only the direction is ambiguous on a new headset.
+        float roll = VRManager.headRollSign;
+        float roll2 = Row(R(colAx, y, colW, rowH), "Roll sign", roll, 2f, -1f, 1f, "roll_sign", "0"); y += rowH;
+        if (roll2 != roll) VRManager.headRollSign = (roll2 < 0f) ? -1f : 1f;
+
         // ---- Column B: what it looks like and what it costs ----
         y = y0;
         ResolutionRow(R(colBx, y, colW, rowH)); y += rowH;

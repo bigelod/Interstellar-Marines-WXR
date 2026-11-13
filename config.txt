@@ -121,6 +121,18 @@ render_height=960
 # Re-read every 2s, so tune it live.
 world_render_scale=0.5
 
+# Head roll, XOPS-WXR style. The camera is rendered with yaw/pitch only and the
+# world render texture above is rotated by the head's roll at composite time, so
+# the world and the gun roll while the visor HUD stays fixed. This needs
+# world_render_scale below 1.0; with 1.0 the camera keeps the full rotation.
+# roll_sign=-1 matches XOPS; flip to +1 if the horizon tilts the wrong way.
+head_roll=1
+roll_sign=-1
+# 0 (XOPS default) = the gun is inside the rolled world texture and rolls with
+# the world. 1 = counter-rotate the gun so it stays level with the fixed HUD,
+# like a viewmodel. XOPS found the counter-rotated version swings on every tilt.
+hands_roll=0
+
 # Supersampling for the visor HUD's own render target, written into
 # HUDCamera.hudScale. That field is NOT a screen-size knob despite the name: the
 # game sizes its two HUD render textures at Screen * hudScale AND divides the

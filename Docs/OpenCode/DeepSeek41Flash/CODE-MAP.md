@@ -11,7 +11,7 @@ commit wins, because that audit predates three commits.
 | `Plugin.cs` | BepInEx entry point, config parsing, build stamp, resolution, UDP init, Harmony patch-all, global sync pixel, input runner, tuning menu |
 | `XRAPI.cs` | XrApi **0.4** client: handshake, receive thread, parse, pose accessors, outbound packet, haptics, mode switching |
 | `Patches.cs` | Every Harmony patch **and** `VRGlassAnchor` / `VRHUDAnchor` / `VRVisualTweaks` / `VRInputRunner` |
-| `VRHeadTracker.cs` | Applies head pose to `WorldCamera`, parks `VRRoot` on the Marine, calls `VRClipGuard` |
+| `VRHeadTracker.cs` | Applies head pose to `WorldCamera`, parks `VRRoot` on the Marine, splits head roll out when the world composite is active, calls `VRClipGuard` |
 | `VRHands.cs` | Single source of the dominant-hand world pose, shared by gun and interaction |
 | `VRWeapon.cs` | Places the weapon model and muzzle, fires haptics on ammo drop |
 | `VRHandInteract.cs` | Hand-ray interaction, replicates the game's Use toggle |
@@ -80,7 +80,9 @@ LateUpdate
   VRHeadTracker.LateUpdate
       park VRRoot on the Marine (yaw only)
       camera.localPosition = base + eye offset + clamped lean
-      camera.localRotation = baseLocalRot * headRot
+      if world composite active: camera.localRotation = yaw/pitch only,
+                                  headRollRad = tracked roll
+      else:                       camera.localRotation = base * full head pose
       VRClipGuard.Apply(cam)
       VRWorldScaler.Apply(cam)  -> WorldCamera.targetTexture = low-res RT
   VRWeapon.LateUpdate
@@ -93,9 +95,10 @@ LateUpdate
       restore original parent when visor Open
       do NOT scale HUD UI Root
 
-OnRenderImage (VRWorldScaler's depth-0.5 camera)
-  clear to black, then Graphics.Blit low-res WorldCamera RT -> Unity's destination,
-  before the HUD cameras; never reads the destination it writes
+OnPostRender (VRWorldScaler's depth-0.5 camera)
+  clear to black; Graphics.Blit when roll is ~0, otherwise draw the world RT as a
+  GL quad rotated about the screen centre by headRoll * headRollSign
+  before the HUD cameras; never reads the texture it draws to
 
 OnPostRender (SyncPixelQuad's depth-1000 camera)
   VRPainOverlay.Draw   peripheral bands, once per frame
@@ -273,13 +276,19 @@ it; the faint alpha tint is the remaining glass cue.
   Screen.fullScreen)` at startup and on spawn. `render_width=0` opts out.
 - **World scaler:** `VRWorldScaler` sets `WorldCamera.targetTexture` to a
   `Screen * world_render_scale` RT (default 0.5 = 640x480 in a 1280x960
-  window). A depth-0.5 camera clears to black, then blits the RT to screen from
-  `OnRenderImage` before `HelmetCamera` / `CAM Camera` at depth 1. The HUD
-  cameras keep using `Screen` dimensions, so the visor and text stay
-  full-resolution. `1.0` restores direct rendering. The game's
-  `CopyToScreenRT` is disabled while the RT is active: it copies into
-  `RenderTexture.active`, which is the RT, so it would feed the frame back into
-  itself; it is restored on pause and at `1.0`.
+  window). A depth-0.5 camera clears to black, then draws the RT as a textured
+  quad before `HelmetCamera` / `CAM Camera` at depth 1. When head roll is on,
+  the quad is rotated about the screen centre by the tracked roll, so the world
+  and gun roll while the HUD stays fixed (XOPS-WXR's present-time sprite
+  rotation). The HUD cameras keep using `Screen` dimensions, so the visor and
+  text stay full-resolution. `hands_roll=1` counter-rotates
+  `VRHands.GetDominantPose` (and the interaction ray) by the negative composite
+  roll so the gun stays level with the HUD; the default `0` is XOPS: the gun
+  rolls with the world. `1.0` restores direct rendering and leaves the
+  full rotation on the camera. The game's `CopyToScreenRT` is disabled while
+  the RT is active: it copies into `RenderTexture.active`, which is the RT, so
+  it would feed the frame back into itself; it is restored on pause and at
+  `1.0`.
 - **Staggered periodic work:** config poll 2 s, post-FX 3 s, HUD safe-area
   scan 3 s, light sweep 4 s. `FindObjectsOfType` and `GetComponentsInChildren`
   allocate, so keeping them off the same frame avoids a recurring spike.
@@ -353,5 +362,6 @@ it; the faint alpha tint is the remaining glass cue.
 12. **Do not "fix" the helmet by removing it.** The bent-glass visor is the
     game's identity.
 13. **Keep `world_render_scale=1.0` as the rollback.** If the low-res composite
-    ever draws over the HUD or leaves a stale frame, 1.0 restores direct
-    `WorldCamera` rendering without a rebuild.
+    ever draws over the HUD, leaves a stale frame, or the head-roll split
+    misbehaves, 1.0 restores direct `WorldCamera` rendering and puts the full
+    rotation back on the camera, without a rebuild.
