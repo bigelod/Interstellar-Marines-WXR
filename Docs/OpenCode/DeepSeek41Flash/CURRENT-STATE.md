@@ -135,13 +135,12 @@ the 2 s poll reverts them.
 | `pain_bar_width` | `0.15` | `0.15` | Fraction of visible width |
 | `pain_bar_inset` | `1.00` | `1.00` | Confirmed on device; full frame width is visible |
 | `occluder_scale` | `1.0` | `1.0` | `HelmetOccluder`; layer 14, cannot affect the world |
-| `screen_fov` | `90` | `104.5` | Runtime paint angle, **not** the camera FOV (98 vertical) |
-| `render_width` / `render_height` | `1280` / `960` | same | Applied at startup and on spawn; `0` opts out |
-| `world_render_scale` | `0.5` | `0.5` | 3D world renders at 640x480 inside the 1280x960 window; HUD stays full-res. `1.0` disables |
-| `world_width` / `world_height` | `0` / `0` | `0` / `0` | Fixed native 3D camera render size; both non-zero override `world_render_scale`. The quad upscales to the display. The VR Settings **Camera res** row writes these |
+| `fov_h` / `fov_v` | `0` / `0` | `0` / `0` | Outbound 7278 FOV per axis, degrees. `0` = auto: `system` FOV if present, else the inbound packet's tangents, else 104.5. VR Settings **FOV H/V** rows |
+| `render_width` / `render_height` | `0` / `0` | same | `0,0` = AUTO/MAX from the container; `-1,-1` = leave the window alone. Menu presets follow the detected 1:1 / 16:9 / 4:3 aspect |
+| `world_render_scale` | `0.5` | `0.5` | 3D world render scale, `0.25`–`2.0`. Below 1 performance, `1.0` direct, above 1 supersampling. HUD stays full-res |
 | `gun_fullres` | `1` | `true` | Weapon gets its own full-res camera on layer 30; the low-res world pass stops drawing it. Drawn over the upscaled world with depth cleared, so walls do not occlude it |
 | `quad_overscale` | `1.25` | `1.25` | Composite quad is drawn this much larger than the window, reducing black edge gaps during head roll. Crops the world edges and narrows the displayed FOV; `1.00` is exact fit. VR Settings **Overscan** row |
-| `head_roll` | `1` | `true` | XOPS-style roll: the camera is yaw/pitch only and the world composite is rotated, so the world/gun roll and the HUD stays fixed. Requires `world_render_scale < 1.0`; `0` removes head roll |
+| `head_roll` | `1` | `true` | XOPS-style roll: the camera is yaw/pitch only and the world composite is rotated, so the world/gun roll and the HUD stays fixed. Requires the composite (`world_render_scale != 1.0`); `0` removes head roll |
 | `roll_sign` | `-1` | `-1` | Flips the composite roll direction. `-1` matches XOPS; use `+1` if the horizon tilts the wrong way |
 | `hands_roll` | `1` | `true` | `1` = counter-rotate the gun so it stays fixed on screen with the HUD (owner's choice: a gun rolling with the world reads as the whole body spinning). `0` = XOPS: the gun rides the rolled world texture and rolls with it |
 | `hud_supersample` | `1.1` | `1.1` | `HUDCamera.hudScale`; game default. The 0.5 world scale already doubles relative HUD sharpness |

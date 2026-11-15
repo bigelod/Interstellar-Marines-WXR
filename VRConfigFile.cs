@@ -16,6 +16,8 @@ public static class VRConfigFile
     static string[] AliasesFor(string key)
     {
         if (key == "screen_fov") return new string[] { "screen_fov", "screenfov", "vr_fov", "fov" };
+        if (key == "fov_h") return new string[] { "fov_h", "fovh", "fov_x", "fovx" };
+        if (key == "fov_v") return new string[] { "fov_v", "fovv", "fov_y", "fovy" };
         if (key == "eye_height") return new string[] { "eye_height", "eyeheight" };
         if (key == "eye_forward") return new string[] { "eye_forward", "eyeforward" };
         if (key == "hand_height") return new string[] { "hand_height", "handheight" };

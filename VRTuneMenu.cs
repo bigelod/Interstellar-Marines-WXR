@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 
@@ -44,14 +45,11 @@ public class VRTuneMenu : MonoBehaviour
     // because most of the pairs those would let you build are not worth rendering.
     // Lower is a real win here: every pixel is rendered, captured, encoded and then
     // repainted across the panel, so it is paid for more than once.
-    static readonly int[] RES_W = new int[] { 0, 1024, 1280, 1280, 1400, 1600 };
-    static readonly int[] RES_H = new int[] { 0, 768, 960, 1024, 1400, 1200 };
-
-    // Native size of the 3D world camera's render target. The quad is stretched to the
-    // display either way, so these are direct performance presets. 0 = window/off.
-    // 4:3 to match the 1280x960 window; a different aspect would be stretched by the
-    // full-screen quad, so keep them 4:3.
-    static readonly int[] NATIVE_W = new int[] { 0, 480, 640, 800, 960, 1024, 1280 };
+    // Built at startup from the container's max mode: 0 = Auto/Max, 1 = Off, then
+    // presets matching the detected 1:1 / 16:9 / 4:3 aspect, capped at the max.
+    static int[] RES_W = new int[] { 0, -1 };
+    static int[] RES_H = new int[] { 0, -1 };
+    static bool resBuilt = false;
 
     bool ShouldShow()
     {
@@ -151,9 +149,13 @@ public class VRTuneMenu : MonoBehaviour
         // Fog follows this automatically - see VRVisualTweaks.ApplyFog.
         VRManager.farClip = Row(R(colAx, y, colW, rowH), "Far clip (fog)", VRManager.farClip, 5f, 10f, 400f, "far_clip", "0"); y += rowH;
 
-        float fov = XRAPI.GetDeclaredFov();
-        float fov2 = Row(R(colAx, y, colW, rowH), "Screen FOV", fov, 5f, 20f, 160f, "screen_fov", "0.#"); y += rowH;
-        if (Mathf.Abs(fov2 - fov) > 0.001f) XRAPI.SetDeclaredFov(fov2);
+        // Outbound FOV for the 7278 packet, per axis, in degrees. 0 = auto: show the
+        // effective runtime value with an "a" suffix; the first -/+ pins a value.
+        float effH, effV;
+        XRAPI.GetEffectiveFov(out effH, out effV);
+        VRManager.fovH = FovRow(R(colAx, y, colW, rowH), "FOV H", VRManager.fovH, effH, "fov_h"); y += rowH;
+        VRManager.fovV = FovRow(R(colAx, y, colW, rowH), "FOV V", VRManager.fovV, effV, "fov_v"); y += rowH;
+        XRAPI.SetConfiguredFov(VRManager.fovH, VRManager.fovV);
 
         VRManager.turnSpeed = Row(R(colAx, y, colW, rowH), "Turn speed", VRManager.turnSpeed, 5f, 10f, 240f, "turn_speed", "0"); y += rowH;
 
@@ -174,9 +176,9 @@ public class VRTuneMenu : MonoBehaviour
         y = y0;
         ResolutionRow(R(colBx, y, colW, rowH)); y += rowH;
 
-        // Low-res world, full-res window/HUD. The preset is a native render size for
-        // WorldCamera; the composite quad upscales it to the display.
-        WorldNativeRow(R(colBx, y, colW, rowH)); y += rowH;
+        // World render scale: below 1.0 is the performance win, 1.0 is direct rendering,
+        // above 1.0 supersamples the world for a stronger headset.
+        VRManager.worldRenderScale = Row(R(colBx, y, colW, rowH), "World res", VRManager.worldRenderScale, 0.05f, 0.25f, 2.00f, "world_render_scale", "0.00"); y += rowH;
 
         // Draw the composite slightly larger than the window so a head roll does not
         // expose black corners. Crops the world edges by the same factor.
@@ -222,12 +224,73 @@ public class VRTuneMenu : MonoBehaviour
 
     static Rect R(float x, float y, float w, float h) { return new Rect(x, y, w, h); }
 
+    // Resolution presets come from the container's own max mode and aspect. 1:1, 16:9
+    // and 4:3 are the three panels this project targets; anything else falls back to the
+    // 4:3 list but is still capped at the detected max.
+    void BuildResolutionPresets()
+    {
+        if (resBuilt) return;
+        resBuilt = true;
+
+        if (VRManager.containerMaxWidth <= 0 || VRManager.containerMaxHeight <= 0)
+            VRManager.DetectContainerResolution();
+
+        int maxW = Mathf.Max(320, VRManager.containerMaxWidth);
+        int maxH = Mathf.Max(240, VRManager.containerMaxHeight);
+        int aspect = VRManager.containerAspect;
+
+        int[] widths;
+        if (aspect == 1)       widths = new int[] { 512, 640, 768, 800, 1024, 1280, 1440, 1600, 1920 };
+        else if (aspect == 16) widths = new int[] { 640, 854, 960, 1280, 1366, 1600, 1920, 2560 };
+        else                   widths = new int[] { 640, 800, 960, 1024, 1152, 1280, 1400, 1600, 1920 };
+
+        List<int> ws = new List<int>();
+        List<int> hs = new List<int>();
+        for (int i = 0; i < widths.Length; i++)
+        {
+            int w = widths[i];
+            int h = (aspect == 1) ? w
+                  : (aspect == 16) ? Mathf.RoundToInt(w * 9f / 16f)
+                  : (w * 3 / 4);
+            if (w > maxW || h > maxH) continue;
+            ws.Add(w);
+            hs.Add(h);
+        }
+
+        bool hasMax = false;
+        for (int i = 0; i < ws.Count; i++)
+            if (ws[i] == maxW && hs[i] == maxH) { hasMax = true; break; }
+        if (!hasMax) { ws.Add(maxW); hs.Add(maxH); }
+
+        // Presets ascending by area; Off at 0 and Auto at 1 stay first.
+        RES_W = new int[2 + ws.Count];
+        RES_H = new int[2 + hs.Count];
+        RES_W[0] = -1; RES_H[0] = -1;     // Off / leave the window alone
+        RES_W[1] = 0; RES_H[1] = 0;       // Auto / container max
+        for (int i = 0; i < ws.Count; i++) { RES_W[i + 2] = ws[i]; RES_H[i + 2] = hs[i]; }
+
+        for (int i = 2; i < RES_W.Length; i++)
+        {
+            for (int j = i + 1; j < RES_W.Length; j++)
+            {
+                long a = (long)RES_W[i] * RES_H[i];
+                long b = (long)RES_W[j] * RES_H[j];
+                if (b < a)
+                {
+                    int tw = RES_W[i]; RES_W[i] = RES_W[j]; RES_W[j] = tw;
+                    int th = RES_H[i]; RES_H[i] = RES_H[j]; RES_H[j] = th;
+                }
+            }
+        }
+    }
+
     // Resolution is a preset list rather than two free numbers, and it applies straight
     // away: Screen.SetResolution reallocates the backbuffer and, through HUDCamera.Update,
     // the HUD's two render targets, so it must not be left to the 2s config poll to pick
     // up - that would reallocate them again on a timer.
     void ResolutionRow(Rect r)
     {
+        BuildResolutionPresets();
         int idx = CurrentResIndex();
         int before = idx;
 
@@ -236,9 +299,9 @@ public class VRTuneMenu : MonoBehaviour
         float bx = r.x + r.width * 0.46f;
 
         if (GUI.Button(new Rect(bx, r.y + r.height * 0.1f, bw, r.height * 0.8f), "-", button)) idx--;
-        string text = (RES_W[Mathf.Clamp(idx, 0, RES_W.Length - 1)] == 0)
-            ? "native"
-            : RES_W[Mathf.Clamp(idx, 0, RES_W.Length - 1)] + "x" + RES_H[Mathf.Clamp(idx, 0, RES_H.Length - 1)];
+        int w = RES_W[Mathf.Clamp(idx, 0, RES_W.Length - 1)];
+        int h = RES_H[Mathf.Clamp(idx, 0, RES_H.Length - 1)];
+        string text = (w < 0) ? "Off" : (w == 0 ? "Auto" : w + "x" + h);
         GUI.Label(new Rect(bx + bw, r.y, r.width * 0.30f, r.height), text, value);
         if (GUI.Button(new Rect(bx + bw + r.width * 0.30f, r.y + r.height * 0.1f, bw, r.height * 0.8f), "+", button)) idx++;
 
@@ -252,88 +315,60 @@ public class VRTuneMenu : MonoBehaviour
         VRManager.ApplyRenderResolution();
     }
 
-    // Native size of the world camera render target. The quad upscales it to the
-    // display, so this is the main fill-rate lever. 0 = window/off (direct render).
-    void WorldNativeRow(Rect r)
-    {
-        int idx = CurrentNativeIndex();
-        int before = idx;
-
-        GUI.Label(new Rect(r.x, r.y, r.width * 0.46f, r.height), "Camera res", label);
-        float bw = r.width * 0.12f;
-        float bx = r.x + r.width * 0.46f;
-
-        if (GUI.Button(new Rect(bx, r.y + r.height * 0.1f, bw, r.height * 0.8f), "-", button)) idx--;
-
-        int current = NATIVE_W[Mathf.Clamp(idx, 0, NATIVE_W.Length - 1)];
-        string text = (current == 0) ? "Off" : (current + "x" + (current * 3 / 4));
-        GUI.Label(new Rect(bx + bw, r.y, r.width * 0.30f, r.height), text, value);
-
-        if (GUI.Button(new Rect(bx + bw + r.width * 0.30f, r.y + r.height * 0.1f, bw, r.height * 0.8f), "+", button)) idx++;
-
-        idx = Mathf.Clamp(idx, 0, NATIVE_W.Length - 1);
-        if (idx == before) return;
-
-        int w = NATIVE_W[idx];
-        if (w == 0)
-        {
-            VRManager.worldNativeWidth = 0;
-            VRManager.worldNativeHeight = 0;
-            VRManager.worldRenderScale = 1f;
-            VRConfigFile.Set("world_width", "0");
-            VRConfigFile.Set("world_height", "0");
-            VRConfigFile.Set("world_render_scale", "1");
-        }
-        else
-        {
-            int h = w * 3 / 4;
-            VRManager.worldNativeWidth = w;
-            VRManager.worldNativeHeight = h;
-            // Keep the scale key in step so a hand edit and this menu agree about the
-            // approximate fraction of the window being rendered.
-            VRManager.worldRenderScale = Mathf.Clamp((float)w / Mathf.Max(1, Screen.width), 0.25f, 1f);
-            VRConfigFile.Set("world_width", w.ToString(CultureInfo.InvariantCulture));
-            VRConfigFile.Set("world_height", h.ToString(CultureInfo.InvariantCulture));
-            VRConfigFile.Set("world_render_scale", VRManager.worldRenderScale.ToString("0.###", CultureInfo.InvariantCulture));
-        }
-        try { VRManagerLogger.LogInfo("[IMVR] Native camera resolution -> " + (w == 0 ? "window/off" : (w + "x" + (w * 3 / 4)))); } catch { }
-    }
-
-    int CurrentNativeIndex()
-    {
-        if (VRManager.worldNativeWidth <= 0 && VRManager.worldRenderScale >= 0.999f) return 0; // off
-        int want = VRManager.worldNativeWidth > 0
-            ? VRManager.worldNativeWidth
-            : Mathf.RoundToInt(Screen.width * VRManager.worldRenderScale);
-
-        int best = 1;
-        int bestDiff = int.MaxValue;
-        for (int i = 1; i < NATIVE_W.Length; i++)
-        {
-            int diff = Math.Abs(NATIVE_W[i] - want);
-            if (diff < bestDiff) { bestDiff = diff; best = i; }
-        }
-        return best;
-    }
-
     // Nearest preset by pixel count when the configured pair is not in the list, so a
     // hand-edited config.txt still lands somewhere sensible instead of snapping to 0.
     int CurrentResIndex()
     {
-        for (int i = 0; i < RES_W.Length; i++)
+        if (VRManager.renderWidth < 0 || VRManager.renderHeight < 0) return 0; // Off
+        if (VRManager.renderWidth == 0 && VRManager.renderHeight == 0) return 1; // Auto
+
+        for (int i = 2; i < RES_W.Length; i++)
         {
             if (RES_W[i] == VRManager.renderWidth && RES_H[i] == VRManager.renderHeight) return i;
         }
-        if (VRManager.renderWidth <= 0) return 0;
-        int best = 1;
+
         long want = (long)VRManager.renderWidth * VRManager.renderHeight;
+        int best = 1;
         long bestDiff = long.MaxValue;
-        for (int i = 1; i < RES_W.Length; i++)
+        for (int i = 2; i < RES_W.Length; i++)
         {
             long diff = Math.Abs((long)RES_W[i] * RES_H[i] - want);
             if (diff < bestDiff) { bestDiff = diff; best = i; }
         }
         return best;
+    }
+
+    // FOV row: 0 means "follow the runtime". Display the effective value with an "a"
+    // suffix so the player can see what is actually being sent; the first -/+ pins it.
+    float FovRow(Rect r, string text, float configured, float effective, string key)
+    {
+        GUI.Label(new Rect(r.x, r.y, r.width * 0.46f, r.height), text, label);
+
+        float bw = r.width * 0.12f;
+        float bx = r.x + r.width * 0.46f;
+        float shown = configured > 1f ? configured : effective;
+        bool auto = configured <= 1f;
+
+        if (GUI.Button(new Rect(bx, r.y + r.height * 0.1f, bw, r.height * 0.8f), "-", button))
+        {
+            shown = Mathf.Clamp(shown - 5f, 0f, 180f);
+            configured = shown;
+            auto = configured <= 1f;
+            VRConfigFile.Set(key, configured.ToString("0.#", CultureInfo.InvariantCulture));
+        }
+
+        GUI.Label(new Rect(bx + bw, r.y, r.width * 0.30f, r.height),
+            shown.ToString("0.#", CultureInfo.InvariantCulture) + (auto ? "a" : ""), value);
+
+        if (GUI.Button(new Rect(bx + bw + r.width * 0.30f, r.y + r.height * 0.1f, bw, r.height * 0.8f), "+", button))
+        {
+            shown = Mathf.Clamp(shown + 5f, 0f, 180f);
+            configured = shown;
+            auto = configured <= 1f;
+            VRConfigFile.Set(key, configured.ToString("0.#", CultureInfo.InvariantCulture));
+        }
+
+        return configured;
     }
 
     // Returns the possibly-changed value, and persists it on change. Taking and

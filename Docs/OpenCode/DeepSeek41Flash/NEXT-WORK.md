@@ -51,18 +51,15 @@ Ask for one report covering:
    still present.
 4. **3 Nov batch:** peripheral damage bands, helmet lamp shadows, interaction
    ray, HUD supersampling at 2.0, haptics.
-5. **World scale:** with `world_render_scale=0.5`, HUD text should stay sharp
-   while the world is softer. The VR Settings **Camera res** row now offers
-   fixed native targets (480x360, 640x480, 800x600, 960x720, 1024x768,
-   1280x960, or Off); those write `world_width`/`world_height` and override
-   `world_render_scale`. The quad still upscales the target to the display; the
-   HUD stays full-res. Pause/menus must not show a stale low-res frame;
-   changing resolution must recreate the RT; `Off`/`world_render_scale=1.0`
-   must return to direct rendering. With `gun_fullres=1` the gun should stay
-   sharp while the world is soft; it is drawn over the world, so watch for it
-   clipping through walls (set `gun_fullres=0` to revert). **Overscan** (default
-   1.25) enlarges the world quad to hide roll corners; it crops the world edges
-   and zooms the image, so check the apparent FOV against `screen_fov`.
+5. **World scale:** `world_render_scale` is now 0.25–2.0; below 1 is the
+   performance win, above 1 supersamples. The window resolution row is
+   aspect-aware and capped at the detected container max; `render_width=0,0`
+   means AUTO/MAX, `-1,-1` means leave the window alone. With `world_render_scale=0.5`,
+   HUD text should stay sharp while the world is softer. `gun_fullres=1` keeps
+   the gun sharp; it is drawn over the world, so watch for it clipping through
+   walls (set `gun_fullres=0` to revert). **Overscan** (default 1.25) enlarges
+   the world quad to hide roll corners; it crops the world edges and zooms the
+   image, so check the apparent FOV. `1.0`/Off returns to direct rendering.
 
    **Re-test after the 7 Nov glow report.** The first device run produced a
    runaway white glow that reset on pause. Cause: `WorldCamera` was the only
@@ -88,6 +85,11 @@ Ask for one report covering:
    hands still move in `hands_roll=1`, note whether they rotate around the
    screen centre (camera-forward pivot) or drift. With `world_render_scale=1.0`,
    head roll falls back to the camera and the HUD rolls with it.
+8. **FOV H/V:** leave `fov_h=0`/`fov_v=0`, note the `System FOV` /
+   `Runtime FOV default` log line, then adjust one axis at a time from the VR
+   Settings **FOV H/V** rows (the value shows with `a` while auto). The goal is
+   the pair that fills the panel without horizontal or vertical stretch; the
+   camera FOV is separate and stays 98.
 
 If it misbehaves, bisect in this order: handshake (`version`/`vr`/`system`) →
 world scaler (`world_render_scale` 1.0) → UDP parser (revert to string parser) →

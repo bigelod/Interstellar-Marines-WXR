@@ -74,8 +74,14 @@ public static class XRAPI
     static int rightHapticFrames = 0;
     static int modeVR = 1; // 1 to enable VR, 0 to disable VR
     static int mode3D = 0; // 0 mono for IM, 1 SBS, 2 AER
-    static float targetFovX = 104.5f;
-    static float targetFovY = 104.5f;
+    // Outbound FOV is tunable per axis. 0 means "auto": the system file's FOV if it
+    // publishes one, then the runtime's inbound FOV (floats 26/27, tangents of the
+    // half-angle), then 104.5 as the protocol's fallback.
+    static float configuredFovH = 0f;
+    static float configuredFovV = 0f;
+    static float systemFovH = 0f;
+    static float systemFovV = 0f;
+    static bool loggedRuntimeFov = false;
 
 
     public static void XR_Init()
@@ -233,6 +239,77 @@ public static class XRAPI
     // `system` line 1 is the manufacturer, line 2 the product codename. The codename
     // mapping is from Docs/general_wxr/XRAPI_V0_4_DESC.md; default to Quest 3 rather
     // than failing when the file is absent.
+    // The documented seven-line `system` file does not carry FOV, but runtimes have
+    // grown optional fields over time. Accept any line whose label contains fov, with
+    // the axis after the label (fovx/fovy, fov_h/fov_v, "fov 90 90"), and treat values
+    // below 1.5 as a half-angle tangent so both conventions land in degrees.
+    static void ParseSystemFov(string[] lines)
+    {
+        if (lines == null) return;
+        float h = 0f, v = 0f;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i] == null) continue;
+            string l = lines[i].Trim().ToLowerInvariant();
+            if (l.Length == 0) continue;
+            int fi = l.IndexOf("fov");
+            if (fi < 0) continue;
+
+            float[] nums = ExtractNumbers(l);
+            if (nums.Length == 0) continue;
+
+            string after = l.Substring(fi + 3);
+            bool hAxis = after.IndexOf('h') >= 0 || after.IndexOf('x') >= 0 || after.IndexOf("horiz") >= 0;
+            bool vAxis = after.IndexOf('v') >= 0 || after.IndexOf('y') >= 0 || after.IndexOf("vert") >= 0;
+
+            if (hAxis && !vAxis) h = nums[0];
+            else if (vAxis && !hAxis) v = nums[0];
+            else if (nums.Length >= 2) { h = nums[0]; v = nums[1]; }
+            else { if (h <= 0f) h = nums[0]; if (v <= 0f) v = nums[0]; }
+        }
+
+        h = FovToDegrees(h);
+        v = FovToDegrees(v);
+        if (h > 1f) systemFovH = h;
+        if (v > 1f) systemFovV = v;
+        if (systemFovH > 1f || systemFovV > 1f)
+        {
+            try {
+                VRManagerLogger.LogInfo("[IMVR] System FOV -> H=" + systemFovH.ToString("0.##", CultureInfo.InvariantCulture)
+                    + " V=" + systemFovV.ToString("0.##", CultureInfo.InvariantCulture));
+            } catch { }
+        }
+    }
+
+    static float FovToDegrees(float f)
+    {
+        if (f <= 0f) return 0f;
+        // Values under ~1.5 are almost certainly tangents of a half-angle.
+        if (f < 1.5f) return 2f * Mathf.Atan(f) * Mathf.Rad2Deg;
+        return f;
+    }
+
+    static float[] ExtractNumbers(string s)
+    {
+        System.Collections.Generic.List<float> found = new System.Collections.Generic.List<float>();
+        int i = 0;
+        while (i < s.Length)
+        {
+            while (i < s.Length && !(char.IsDigit(s[i]) || s[i] == '-' || s[i] == '.')) i++;
+            int start = i;
+            if (i < s.Length && (s[i] == '-' || s[i] == '.')) i++;
+            while (i < s.Length && (char.IsDigit(s[i]) || s[i] == '.')) i++;
+            if (i > start)
+            {
+                float f;
+                if (float.TryParse(s.Substring(start, i - start), NumberStyles.Float, CultureInfo.InvariantCulture, out f))
+                    found.Add(f);
+            }
+        }
+        return found.ToArray();
+    }
+
     static void ReadSystemInfo()
     {
         try
@@ -241,6 +318,7 @@ public static class XRAPI
             if (!File.Exists(systemFile)) return;
 
             string[] lines = File.ReadAllLines(systemFile);
+            ParseSystemFov(lines);
             string make = "META";
             string product = "";
             if (lines.Length > 0 && lines[0] != null && lines[0].Trim().Length > 0) make = lines[0].Trim().ToUpperInvariant();
@@ -417,27 +495,93 @@ public static class XRAPI
     }
 
     // The angle the runtime paints the captured frame across, in degrees. It does NOT
-    // have to equal the camera's real FOV - see config.txt screen_fov. Lower = the same
-    // scene shown smaller and more central, at full render resolution.
-    public static float GetDeclaredFov() { return targetFovX; }
+    // have to equal the camera's real FOV. Configured per axis; 0 = auto from the
+    // runtime, then 104.5.
+    public static void SetConfiguredFov(float hDegrees, float vDegrees)
+    {
+        hDegrees = Mathf.Clamp(hDegrees, 0f, 180f);
+        vDegrees = Mathf.Clamp(vDegrees, 0f, 180f);
+        if (Mathf.Abs(configuredFovH - hDegrees) > 0.01f || Mathf.Abs(configuredFovV - vDegrees) > 0.01f)
+        {
+            try {
+                VRManagerLogger.LogInfo("[IMVR] Declared FOV -> H=" + hDegrees.ToString("0.##", CultureInfo.InvariantCulture)
+                    + " V=" + vDegrees.ToString("0.##", CultureInfo.InvariantCulture)
+                    + (hDegrees <= 1f || vDegrees <= 1f ? " (0 = auto)" : ""));
+            } catch { }
+        }
+        configuredFovH = hDegrees;
+        configuredFovV = vDegrees;
+    }
 
+    public static float GetConfiguredFovH() { return configuredFovH; }
+    public static float GetConfiguredFovV() { return configuredFovV; }
+
+    // Compatibility shims for the arrow-key FOV tuner and older call sites.
+    public static float GetDeclaredFov()
+    {
+        float h, v; GetEffectiveFov(out h, out v); return h;
+    }
     public static void SetDeclaredFov(float fovDegrees)
     {
-        if (Mathf.Abs(targetFovX - fovDegrees) > 0.01f)
+        SetConfiguredFov(fovDegrees, fovDegrees);
+    }
+
+    // Precedence: explicit config, system-file FOV, inbound runtime FOV, protocol default.
+    public static void GetEffectiveFov(out float hDegrees, out float vDegrees)
+    {
+        float h = configuredFovH > 1f ? configuredFovH : 0f;
+        float v = configuredFovV > 1f ? configuredFovV : 0f;
+
+        if (h <= 1f && systemFovH > 1f) h = systemFovH;
+        if (v <= 1f && systemFovV > 1f) v = systemFovV;
+
+        float rh, rv;
+        if (GetRuntimeFov(out rh, out rv))
         {
-            VRManagerLogger.LogInfo("[IMVR] Declared FOV -> " + fovDegrees.ToString(CultureInfo.InvariantCulture) + " (was " + targetFovX.ToString(CultureInfo.InvariantCulture) + ")");
+            if (h <= 1f) h = rh;
+            if (v <= 1f) v = rv;
         }
-        targetFovX = fovDegrees;
-        targetFovY = fovDegrees;
+
+        if (h <= 1f) h = 104.5f;
+        if (v <= 1f) v = 104.5f;
+        hDegrees = h;
+        vDegrees = v;
+    }
+
+    // Inbound floats 26/27 are tangents of the half-angles the runtime wants covered.
+    public static bool GetRuntimeFov(out float hDegrees, out float vDegrees)
+    {
+        lock (lockObj)
+        {
+            if (hasData && latest.fovH > 0.001f && latest.fovV > 0.001f)
+            {
+                hDegrees = 2f * Mathf.Atan(latest.fovH) * Mathf.Rad2Deg;
+                vDegrees = 2f * Mathf.Atan(latest.fovV) * Mathf.Rad2Deg;
+                if (!loggedRuntimeFov)
+                {
+                    loggedRuntimeFov = true;
+                    try {
+                        VRManagerLogger.LogInfo("[IMVR] Runtime FOV default -> H="
+                            + hDegrees.ToString("0.##", CultureInfo.InvariantCulture) + " V="
+                            + vDegrees.ToString("0.##", CultureInfo.InvariantCulture));
+                    } catch { }
+                }
+                return true;
+            }
+        }
+        hDegrees = 0f; vDegrees = 0f;
+        return false;
     }
 
     // Always build the 7278 packet through this. string.Format with InvariantCulture is
-    // not optional: targetFovX.ToString() under a comma-decimal locale emits "104,5",
-    // which turns one field into two and corrupts every field after it.
+    // not optional: a comma-decimal locale turns one field into two and corrupts every
+    // field after it.
     static string BuildOutPacket()
     {
+        float fh, fv;
+        GetEffectiveFov(out fh, out fv);
         return string.Format(CultureInfo.InvariantCulture, "{0} {1} {2} {3} {4} {5}",
-            leftHapticFrames, rightHapticFrames, modeVR, mode3D, targetFovX, targetFovY);
+            leftHapticFrames, rightHapticFrames, modeVR, mode3D, fh, fv);
     }
 
     public static void SendHapticUpdate()

@@ -1,6 +1,10 @@
 dominant_hand=right
 turn_speed=80
 deadzone=0.20
+
+# Bump when an existing config needs a one-time migration. v2 = 0,0 means
+# AUTO/MAX window resolution and FOV H/V replace screen_fov.
+config_version=2
 # Auto-detect from Z:/tmp/xr/system when the runtime provides it:
 #   EUREKA / PANTHER -> Quest 3 (upright)
 #   HOLLYWOOD        -> Quest 2 (upside-down)
@@ -90,44 +94,33 @@ pain_bar_inset=1.00
 # world. Only takes effect on the next spawn.
 occluder_scale=1.0
 
-# How wide an angle WinlatorXR paints the captured frame across, in degrees.
-# This does NOT have to match the FOV the game renders with (98 vertical).
-# Declaring LESS shows the SAME scene, shrunk toward the centre of the view, at
-# full render resolution - no black borders, no lost pixels, and the sync pixel
-# stays in the top-left corner. That makes it the cheap way to fit everything
-# inside the part of the panel the headset actually shows.
-# 90 is the value found on device on 2 Nov 2026 - confirmed working, and proof
-# that the runtime does consume this field. 104.5 is the HWXR default.
-#
-# ADJUSTABLE IN THE HEADSET: open any menu or pause, click "VR Settings" in the
-# upper-left of the content area, and use the -/+ buttons. Every setting in this
-# file is in that panel, and every change is written straight back here.
-screen_fov=90
+# FOV sent to WinlatorXR on the 7278 packet, per axis, in degrees. This does NOT
+# have to match the FOV the game renders with. Declaring LESS shows the SAME scene,
+# shrunk toward the centre of the view, at full render resolution.
+# 0 = AUTO: use the FOV the runtime reports (the `system` info file if it carries
+# one, otherwise the inbound packet's FOV tangents), then fall back to 104.5.
+# Set either axis independently to tune H/V distortion; the VR Settings rows are
+# "FOV H" and "FOV V".
+fov_h=0
+fov_v=0
 
 # Render resolution, applied once at startup and again when changed from the VR
 # Settings panel. Lower is a real win here - every pixel is rendered, captured,
 # encoded and then repainted across the panel, so it is paid for more than once.
-# 1280x960 is the owner's balance point. 1024x768 is the next step down.
-# Set render_width=0 to leave the window alone entirely, which is the escape hatch
-# if a resolution change ever upsets the HUD bend pipeline.
-render_width=1280
-render_height=960
+# 0,0 = AUTO/MAX: use the largest mode the container reports. -1,-1 = OFF: leave
+# the window exactly as the game/container made it. A positive pair pins it.
+# The VR Settings resolution row offers presets for the detected 1:1 / 16:9 / 4:3
+# aspect, capped at the container maximum.
+render_width=0
+render_height=0
 
 # Internal resolution for the 3D WORLD ONLY. The window and the HUD stay at
 # render_width x render_height, so the visor text keeps full resolution while the
-# expensive world pass renders fewer pixels. 0.5 = a 640x480 world in a 1280x960
-# window. This is the XOPS-WXR split: low-res background, full-res UI.
-# Lower is a direct fill-rate win. 1.0 disables the mechanism entirely.
-# Re-read every 2s, so tune it live.
+# expensive world pass renders fewer pixels. 0.5 = a half-size world; 1.0
+# disables the composite and renders direct; above 1.0 supersamples the world
+# for a stronger headset. This is the XOPS-WXR split: low-res background,
+# full-res UI. Re-read every 2s, so tune it live.
 world_render_scale=0.5
-
-# Fixed native size for the 3D world camera. When both are non-zero they override
-# world_render_scale; the composite quad is still upscaled to the full display.
-# This is the performance setting: 640x480 renders 307k pixels, 960x720 renders
-# 691k, window/off renders at the full display. 4:3 so the quad does not stretch.
-# The VR Settings menu row "Camera res" writes these.
-world_width=0
-world_height=0
 
 # Render the first-person weapon at full window resolution in its own camera while
 # the world/body stay on the low-res target. This keeps the gun crisp and leaves
@@ -143,8 +136,9 @@ quad_overscale=1.25
 
 # Head roll, XOPS-WXR style. The camera is rendered with yaw/pitch only and the
 # world render texture above is rotated by the head's roll at composite time, so
-# the world and the gun roll while the visor HUD stays fixed. This needs
-# world_render_scale below 1.0; with 1.0 the camera keeps the full rotation.
+# the world and the gun roll while the visor HUD stays fixed. This needs the
+# composite active (world_render_scale != 1.0); with 1.0 the camera keeps the full
+# rotation.
 # roll_sign=-1 matches XOPS; flip to +1 if the horizon tilts the wrong way.
 head_roll=1
 roll_sign=-1

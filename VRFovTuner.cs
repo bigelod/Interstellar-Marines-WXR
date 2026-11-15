@@ -3,7 +3,7 @@ using System.Globalization;
 using System.IO;
 using UnityEngine;
 
-// In-headset tuning for screen_fov - the angle WinlatorXR paints the captured frame
+// In-headset tuning for the outbound FOV - the angle WinlatorXR paints the captured frame
 // across. The right value can only be found by looking through the lenses, and editing
 // a text file on a standalone headset between attempts is painful. So: pause, tap
 // up/down, watch the view resize, unpause. The chosen value is written straight back
@@ -52,8 +52,11 @@ public static class VRFovTuner
         next = Mathf.Clamp(next, MIN_FOV, MAX_FOV);
 
         if (Mathf.Abs(next - cur) < 0.01f) return; // already at the clamp
-        XRAPI.SetDeclaredFov(next);
-        VRConfigFile.Set("screen_fov", next.ToString("0.##", CultureInfo.InvariantCulture));
+        VRManager.fovH = next;
+        VRManager.fovV = next;
+        XRAPI.SetConfiguredFov(next, next);
+        VRConfigFile.Set("fov_h", next.ToString("0.##", CultureInfo.InvariantCulture));
+        VRConfigFile.Set("fov_v", next.ToString("0.##", CultureInfo.InvariantCulture));
     }
 
     static bool IsPaused()

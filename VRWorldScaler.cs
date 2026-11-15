@@ -46,16 +46,11 @@ public static class VRWorldScaler
 
     public static RenderTexture WorldRT { get { return rt; } }
 
-    // True whenever the low-res world composite should be running. A fixed native size
-    // overrides the scale, so world_render_scale=1.0 must not disable the head-roll split
-    // when world_width/world_height are set.
+    // True whenever the world composite should be running. 1.0 is exact window size and
+    // disables it; below 1.0 is the performance win, above 1.0 supersamples the world.
     public static bool CompositeWanted
     {
-        get
-        {
-            return (VRManager.worldNativeWidth > 0 && VRManager.worldNativeHeight > 0)
-                || VRManager.worldRenderScale < 0.999f;
-        }
+        get { return Mathf.Abs(VRManager.worldRenderScale - 1f) > 0.001f; }
     }
 
     // True only while the composite is actually replacing the world on screen. The
@@ -144,21 +139,16 @@ public static class VRWorldScaler
             return;
         }
 
-        bool native = VRManager.worldNativeWidth > 0 && VRManager.worldNativeHeight > 0;
-        float scale = Mathf.Clamp(VRManager.worldRenderScale, 0.25f, 1f);
-        if (!native && scale >= 0.999f)
+        float scale = Mathf.Clamp(VRManager.worldRenderScale, 0.25f, 2f);
+        if (!CompositeWanted)
         {
             Disable(cam);
             return;
         }
 
         Ensure();
-        int w = native
-            ? Mathf.Clamp(VRManager.worldNativeWidth, 64, 4096)
-            : Mathf.Max(64, Mathf.RoundToInt(Screen.width * scale));
-        int h = native
-            ? Mathf.Clamp(VRManager.worldNativeHeight, 48, 4096)
-            : Mathf.Max(48, Mathf.RoundToInt(Screen.height * scale));
+        int w = Mathf.Max(64, Mathf.RoundToInt(Screen.width * scale));
+        int h = Mathf.Max(48, Mathf.RoundToInt(Screen.height * scale));
         if (rt == null || rtW != w || rtH != h) Recreate(w, h);
         if (rt == null) return;
 

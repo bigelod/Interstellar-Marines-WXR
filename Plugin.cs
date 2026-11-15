@@ -101,24 +101,26 @@ public class VRManager : BaseUnityPlugin
     // square in the player's view for no gain. Config-exposed only so it can be raised again
     // without a rebuild if the runtime ever stops reading it.
     public static int syncPixelSize = 10;
-    // Render resolution, applied once at startup. 0 in either field leaves the window
-    // alone, which is the escape hatch: Docs/MetaAI records an earlier SetResolution
-    // attempt breaking the HUD (FIXED23-25), though that attempt also resized render
-    // targets by hand, which this does not - HUDCamera sizes its own off Screen.
-    // 1280x960 is the owner's balance point between legibility and frame rate.
-    public static int renderWidth = 1280;
-    public static int renderHeight = 960;
+    // Outbound FOV sent to WinlatorXR on the haptic/mode packet, in degrees, per axis.
+    // 0 = auto: the runtime's reported FOV (system file if it carries one, otherwise the
+    // inbound packet's tangents), falling back to 104.5. The camera's own FOV is separate.
+    public static float fovH = 0f;
+    public static float fovV = 0f;
+    // Render resolution. Applied once at startup and on spawn. The config default is
+    // 0,0 = AUTO/MAX: use the largest mode the container reports. -1,-1 = OFF: leave the
+    // window exactly as the game/container made it. A positive pair pins the window.
+    public static int renderWidth = 0;
+    public static int renderHeight = 0;
+    // Detected at startup from the largest Screen.resolutions / currentResolution mode.
+    // The VR Settings resolution row offers presets for this aspect, capped at the max.
+    public static int containerMaxWidth = 0;
+    public static int containerMaxHeight = 0;
+    public static int containerAspect = 0;   // 1 = 1:1, 16 = 16:9, 4 = 4:3
     // Internal resolution multiplier for the 3D world only. The window and the HUD stay
     // at render_width x render_height, so text stays crisp while the expensive world
-    // pass renders fewer pixels. 0.5 = 640x480 world in a 1280x960 window. 1.0 disables
-    // the mechanism. This is the XOPS-WXR trick: low-res world, full-res UI.
+    // pass renders fewer or more pixels. 0.5 = half-size world; 1.0 disables the
+    // mechanism; above 1.0 supersamples the world (for stronger headsets).
     public static float worldRenderScale = 0.5f;
-    // Fixed native size for the 3D world render target. When both are non-zero they
-    // override world_render_scale; the quad is still upscaled to the full display, so
-    // this is a direct "render the game cameras at 640x480" performance setting. 0,0
-    // keeps the scale-based behaviour.
-    public static int worldNativeWidth = 0;
-    public static int worldNativeHeight = 0;
     // Render the first-person weapon at full window resolution in its own camera while
     // the world/body stay on the low-res target. See VRGunCamera.cs. Has no effect when
     // the world composite is off.
@@ -130,7 +132,7 @@ public class VRManager : BaseUnityPlugin
     // Head roll. The game camera is rendered with yaw/pitch only, and the low-res world
     // composite is rotated by the head's roll in VRWorldScaler. The world and the gun
     // (both in that texture) roll with the head; the visor HUD is drawn afterwards and
-    // stays fixed. This is the XOPS-WXR split, and it needs worldRenderScale < 1.0;
+    // stays fixed. This needs the composite active (world_render_scale != 1.0);
     // with the scaler off, the camera keeps the full rotation as a fallback.
     public static bool headRoll = true;
     // -1 matches XOPS-WXR's default. Flip to +1 if the horizon tilts the wrong way.
@@ -179,6 +181,8 @@ public class VRManager : BaseUnityPlugin
 
         ResolveConfigPath();
         ParseConfig();
+        MigrateLegacyConfig();
+        DetectContainerResolution();
         ApplyRenderResolution();
         XRAPI.XR_Init();
 
@@ -257,9 +261,87 @@ public class VRManager : BaseUnityPlugin
         }
     }
 
+    // Old configs pinned 1280x960 and had no fov_h/fov_v. Their first run should adopt
+    // the new defaults (max window, auto FOV) without overwriting a deliberate custom
+    // resolution. A config_version marker makes this a one-time migration.
+    static void MigrateLegacyConfig()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(configPath) || !File.Exists(configPath)) return;
+            string text = File.ReadAllText(configPath);
+            if (text.IndexOf("config_version", StringComparison.OrdinalIgnoreCase) >= 0) return;
+
+            if (renderWidth == 1280 && renderHeight == 960)
+            {
+                renderWidth = 0;
+                renderHeight = 0;
+                VRConfigFile.Set("render_width", "0");
+                VRConfigFile.Set("render_height", "0");
+            }
+            VRConfigFile.Set("config_version", "2");
+            try { VRManagerLogger.LogInfo("[IMVR] Config migrated to v2 (max/AUTO window, per-axis FOV)"); } catch { }
+        }
+        catch { }
+    }
+
+    // Detect the container's largest mode once, and classify its aspect. The VR Settings
+    // resolution row uses this to offer only resolutions that fit the panel; 0,0 in
+    // config means "use this max", -1,-1 means "leave the window alone".
+    public static void DetectContainerResolution()
+    {
+        int maxW = Screen.width;
+        int maxH = Screen.height;
+        try
+        {
+            Resolution cur = Screen.currentResolution;
+            if (cur.width > 0 && cur.height > 0) { maxW = cur.width; maxH = cur.height; }
+
+            Resolution[] all = Screen.resolutions;
+            if (all != null && all.Length > 0)
+            {
+                int bestArea = maxW * maxH;
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i].width <= 0 || all[i].height <= 0) continue;
+                    int area = all[i].width * all[i].height;
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        maxW = all[i].width;
+                        maxH = all[i].height;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        containerMaxWidth = maxW;
+        containerMaxHeight = maxH;
+
+        float ratio = (maxH > 0) ? ((float)maxW / maxH) : 1f;
+        float d1 = Mathf.Abs(ratio - 1f);
+        float d169 = Mathf.Abs(ratio - (16f / 9f));
+        float d43 = Mathf.Abs(ratio - (4f / 3f));
+        if (d1 <= d169 && d1 <= d43) containerAspect = 1;
+        else if (d169 <= d43) containerAspect = 16;
+        else containerAspect = 4;
+
+        try
+        {
+            VRManagerLogger.LogInfo("[IMVR] Container max " + maxW + "x" + maxH + " -> "
+                + (containerAspect == 1 ? "1:1" : containerAspect == 16 ? "16:9" : "4:3"));
+        }
+        catch { }
+    }
+
     // Applied at startup and again whenever the tuning menu changes it - deliberately NOT
     // from PollConfig, because SetResolution reallocates the backbuffer and the HUD's two
     // render targets, which is not something to do every two seconds.
+    //
+    // render_width/height: positive pins the window; 0 in either field asks for the
+    // detected container maximum; any negative value means "off" and leaves the window
+    // exactly as the game/container made it.
     //
     // Nothing else in the mod touches the window. Lower is a real frame-rate win here: the
     // frame is captured, encoded, shipped to the runtime and repainted across the panel, so
@@ -270,11 +352,18 @@ public class VRManager : BaseUnityPlugin
     {
         try
         {
-            if (renderWidth <= 0 || renderHeight <= 0) return;
-            if (Screen.width == renderWidth && Screen.height == renderHeight) return;
-            VRManagerLogger.LogInfo("[IMVR] Render resolution -> " + renderWidth + "x" + renderHeight
+            if (renderWidth < 0 || renderHeight < 0) return; // off
+
+            int w = renderWidth;
+            int h = renderHeight;
+            if (w == 0) w = containerMaxWidth > 0 ? containerMaxWidth : Screen.currentResolution.width;
+            if (h == 0) h = containerMaxHeight > 0 ? containerMaxHeight : Screen.currentResolution.height;
+            if (w <= 0 || h <= 0) return;
+
+            if (Screen.width == w && Screen.height == h) return;
+            VRManagerLogger.LogInfo("[IMVR] Render resolution -> " + w + "x" + h
                 + " (was " + Screen.width + "x" + Screen.height + ")");
-            Screen.SetResolution(renderWidth, renderHeight, Screen.fullScreen);
+            Screen.SetResolution(w, h, Screen.fullScreen);
         }
         catch (Exception e)
         {
@@ -283,7 +372,7 @@ public class VRManager : BaseUnityPlugin
     }
 
     // Called every frame from VRInputRunner, rate-limited to 2s. Cheap, and it means
-    // screen_fov and the rest can be dialled in live without a rebuild or a restart.
+    // FOV and the rest can be dialled in live without a rebuild or a restart.
     public static void PollConfig()
     {
         if(Time.realtimeSinceStartup - lastConfigPoll < 2f) return;
@@ -337,11 +426,11 @@ public class VRManager : BaseUnityPlugin
                 if(k=="occluder_scale" || k=="occluderscale"){ float f; if(float.TryParse(v, out f) && f >= 0.1f && f <= 10f) occluderScale = f; }
                 if(k=="hud_supersample" || k=="hudsupersample"){ float f; if(float.TryParse(v, out f) && f >= 0.5f && f <= 4f) hudSupersample = f; }
                 if(k=="sync_pixel_size" || k=="syncpixelsize"){ int n; if(int.TryParse(v, out n) && n >= 2 && n <= 300) syncPixelSize = n; }
-                if(k=="render_width" || k=="renderwidth"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 320 && n <= 4096))) renderWidth = n; }
-                if(k=="render_height" || k=="renderheight"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 240 && n <= 4096))) renderHeight = n; }
-                if(k=="world_render_scale" || k=="worldscale" || k=="world_scale"){ float f; if(float.TryParse(v, out f) && f >= 0.25f && f <= 1f) worldRenderScale = f; }
-                if(k=="world_width" || k=="worldwidth" || k=="world_native_width"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 4096) worldNativeWidth = n; }
-                if(k=="world_height" || k=="worldheight" || k=="world_native_height"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 4096) worldNativeHeight = n; }
+                if(k=="render_width" || k=="renderwidth"){ int n; if(int.TryParse(v, out n) && (n == -1 || n == 0 || (n >= 320 && n <= 8192))) renderWidth = n; }
+                if(k=="render_height" || k=="renderheight"){ int n; if(int.TryParse(v, out n) && (n == -1 || n == 0 || (n >= 240 && n <= 8192))) renderHeight = n; }
+                if(k=="world_render_scale" || k=="worldscale" || k=="world_scale"){ float f; if(float.TryParse(v, out f) && f >= 0.25f && f <= 2f) worldRenderScale = f; }
+                // world_width/world_height were a fixed-native-size experiment. The
+                // single world_render_scale now covers 0.25..2.0, including supersampling.
                 if(k=="gun_fullres" || k=="gunfullres" || k=="fullres_gun"){ gunFullRes = (v=="true" || v=="1" || v=="yes"); }
                 if(k=="quad_overscale" || k=="quadoverscale" || k=="overscale" || k=="quad_scale"){ float f; if(float.TryParse(v, out f) && f >= 1f && f <= 1.5f) quadOverscale = f; }
                 if(k=="head_roll" || k=="headroll" || k=="roll"){ headRoll = (v=="true" || v=="1" || v=="yes"); }
@@ -349,12 +438,14 @@ public class VRManager : BaseUnityPlugin
                 if(k=="hands_roll" || k=="hand_roll" || k=="handsroll"){ handsRoll = (v=="true" || v=="1" || v=="yes"); }
                 if(k=="shadow_distance" || k=="shadowdistance"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 200f) shadowDistance = f; }
                 if(k=="shadow_resolution" || k=="shadowresolution"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 3) shadowResolution = n; }
-                if(k=="screen_fov" || k=="screenfov" || k=="vr_fov" || k=="fov"){
-                    float f; if(float.TryParse(v, out f) && f > 1f && f <= 180f) XRAPI.SetDeclaredFov(f);
-                }
+                if(k=="fov_h" || k=="fovh" || k=="fov_x" || k=="fovx"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 180f) fovH = f; }
+                if(k=="fov_v" || k=="fovv" || k=="fov_y" || k=="fovy"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 180f) fovV = f; }
             }
             if(!sawFlipHands) flipHandsExplicit = false;
             VRInput.SetConfig(deadzone);
+            // 0 on either axis means auto; XRAPI resolves system file -> inbound packet
+            // -> 104.5 at packet build time.
+            XRAPI.SetConfiguredFov(fovH, fovV);
         } catch(Exception e){
             VRManagerLogger.LogError("[IMVR] Config error: "+e);
         }

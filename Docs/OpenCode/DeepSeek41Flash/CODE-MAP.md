@@ -260,6 +260,16 @@ it; the faint alpha tint is the remaining glass cue.
   `GL` quad in screen-space pixels with blending off and green 0. Size comes
   from `sync_pixel_size` (default 10). When no packets have arrived it uses
   `Time.frameCount % 256` so the runtime can still calibrate. [src]
+- **Outbound FOV:** `fov_h` / `fov_v` are the angles on the 7278 packet. `0`
+  resolves per axis: `system` file FOV if present, else the inbound packet's
+  `fovH`/`fovV` half-angle tangents converted to degrees, else 104.5. The VR
+  Settings **FOV H/V** rows show the effective auto value with an `a` suffix.
+- **Window resolution:** `render_width` / `render_height` `0,0` = AUTO/MAX from
+  the container, `-1,-1` = leave the window alone; a positive pair pins it.
+  `DetectContainerResolution` classifies the largest `Screen.resolutions` mode
+  as 1:1, 16:9 or 4:3; the VR Settings resolution row offers presets for that
+  aspect, capped at the max. `MigrateLegacyConfig` moves an old 1280x960 config
+  to the new default once.
 - **Pain flash:** `VRPainOverlay.Enforce` clamps `MarineController`'s flash to
   alpha 0; `Draw` paints two peripheral red bands from the sync-pixel camera,
   exactly once per frame. `pain_bar_inset` places them against the visible area.
@@ -281,11 +291,9 @@ it; the faint alpha tint is the remaining glass cue.
   config-gated; `far_clip` is the knob.
 - **Resolution:** `Screen.SetResolution(render_width, render_height,
   Screen.fullScreen)` at startup and on spawn. `render_width=0` opts out.
-- **World scaler:** `VRWorldScaler` sets `WorldCamera.targetTexture` to a
-  `Screen * world_render_scale` RT (default 0.5 = 640x480 in a 1280x960
-  window), or to a fixed `world_width * world_height` when both are non-zero.
-  The VR Settings **Camera res** row writes those fixed dimensions; the quad
-  upscales whichever target to the display. It is drawn
+- **World scaler:** `VRWorldScaler` sets `WorldCamera.targetTexture` to
+  `Screen * world_render_scale` (default 0.5; range 0.25–2.0; above 1.0
+  supersamples). The quad upscales/downscales it to the display and is drawn
   `quad_overscale` times larger than the window (default 1.25) so a roll does
   not expose black corners; the same factor crops the world edges and narrows
   the gun camera's FOV to match. A depth-0.5 orthographic camera,

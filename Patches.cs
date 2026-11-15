@@ -373,7 +373,7 @@ class Helmet_VR_NearClip
             // full culling and full distance the rest of the time.
             ___playerCamera.farClipPlane = VRManager.farClip;
             ___playerCamera.fieldOfView = 98f;
-            // Log what the camera ACTUALLY renders, so the declared screen_fov can be
+            // Log what the camera ACTUALLY renders, so the declared FOV can be
             // compared against it. Unity's fieldOfView is vertical; horizontal depends on
             // aspect. Declaring less than these shrinks the view toward the centre.
             if (!loggedRealFov)
@@ -859,7 +859,7 @@ public class VRInputRunner : MonoBehaviour
         // Repair the XrApi handshake if the runtime restarted and wiped Z:/tmp/xr,
         // and keep trying `system` until it appears so flipHands can auto-detect.
         try { XRAPI.TickHandshake(); } catch { }
-        // Up/down while paused nudges screen_fov by 10 and writes it back to config.txt.
+        // Up/down while paused nudges the outbound FOV by 10 and writes it back to config.txt.
         // Runs before PollConfig would overwrite it - Persist rewrites the file, so the
         // 2s poll reads back the value we just set rather than reverting it.
         try { VRFovTuner.Update(); } catch { }
