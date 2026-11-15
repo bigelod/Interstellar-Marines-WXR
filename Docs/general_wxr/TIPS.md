@@ -334,6 +334,11 @@ Two traps learned the hard way in Interstellar Marines:
   `RenderTexture.active`, which **is** the camera's `targetTexture` once it is set.
   That reads and writes the same RT every frame; bloom turns it into a white screen.
   Disable that component while the RT is active and restore it on the rollback path.
+- Do **not** draw the composite with immediate-mode `GL` from `OnPostRender`. It runs
+  directly after the world camera and can inherit that camera's yaw/pitch view matrix;
+  the panel then tilts on X/Y as well as rolling. Use a mesh quad under a dedicated
+  orthographic camera with an identity transform (park it far outside the level) and
+  put the roll on the quad's local Z rotation. Nothing else can move it.
 
 If the game only has yaw/pitch camera control, head roll can be applied as a **2D
 rotation of this world texture** at present time. The HUD drawn afterwards stays fixed,
@@ -341,6 +346,14 @@ and 3D hands/weapons rendered into the world texture roll with it. Do not also r
 camera, and do not counter-rotate the hands against the texture: that glues them to the
 view and makes them swing on every tilt. XOPS-WXR settles this: the sprite rolls, the
 hands roll with it, the 2D HUD does not.
+
+The first-person weapon does not have to accept the world's low resolution. Move its
+renderers to a spare layer, remove that layer from the world camera, and add a child
+camera with the same pose/FOV, `clearFlags = Depth`, and a depth between the composite
+and the HUD. The gun then draws crisp over the upscaled world. It will not be occluded
+by world geometry; that is the normal viewmodel trade. If the world image is rolled,
+roll the gun camera with it for "rolls with the world", or leave it unrolled for a fixed
+viewmodel; counter-roll the interaction ray separately so aim still matches the image.
 
 Expose the scale (0.5 is 640x480 inside 1280x960), a roll sign, and keep `1.0` as the
 rollback. Every extra full-screen pass has a cost, so measure the net win on device

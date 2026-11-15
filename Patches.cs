@@ -877,6 +877,8 @@ public class VRInputRunner : MonoBehaviour
         catch (Exception e) { VRManagerLogger.LogError("[IMVR] VRInput Update failed: " + e); }
         // Enable the low-res world composite only while actually in VR gameplay.
         try { VRWorldScaler.Tick(); } catch { }
+        // Full-res weapon camera rides on the composite; it must tick after the scaler.
+        try { VRGunCamera.Tick(); } catch { }
         if (VRManagerState.verboseDebug && Time.frameCount % 60 == 0)
         {
             XRAPI.State s;

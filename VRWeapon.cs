@@ -57,6 +57,9 @@ public class VRWeapon : MonoBehaviour
             if (model.parent != null) { Transform p2 = model.parent; while (p2 != null) { if (p2.GetComponent<VRHeadTracker>() != null) { model.SetParent(null, true); break; } p2 = p2.parent; } } // detach from head chain to scene root, NOT VRRoot - VRRoot is Destroy()ed on level change and would take gun with it
             model.position = p;
             model.rotation = r;
+            // Put the weapon on its own layer while the full-res gun camera is active,
+            // so WorldCamera stops rendering it into the low-res world texture.
+            try { VRGunCamera.PrepareWeapon(model.gameObject); } catch { }
         }
         if (muzzle != null) muzzle.rotation = r;
     }

@@ -26,14 +26,22 @@ public static class VRHands
     }
 
     // The VR camera is identified by its tracker component rather than by name, because
-    // the Helmet rebuilds it on every spawn and level load.
+    // the Helmet rebuilds it on every spawn and level load. Cached because this runs
+    // every frame and Camera.allCameras allocates; a destroyed camera reads as null and
+    // triggers a rescan on the next call.
+    static Camera cachedHead;
     public static Camera FindHeadCamera()
     {
+        if (cachedHead != null) return cachedHead;
         Camera[] all = Camera.allCameras;
         if (all == null) return null;
         for (int i = 0; i < all.Length; i++)
         {
-            if (all[i] != null && all[i].GetComponent<VRHeadTracker>() != null) return all[i];
+            if (all[i] != null && all[i].GetComponent<VRHeadTracker>() != null)
+            {
+                cachedHead = all[i];
+                return cachedHead;
+            }
         }
         return null;
     }
@@ -89,20 +97,40 @@ public static class VRHands
         pos = headWorld + bodyRot * (p + new Vector3(0f, VRManager.handHeight, 0f));
         rot = bodyRot * r;
 
-        // XOPS leaves the gun inside the rolled world texture (handsRoll=false), so it
-        // rolls with the world. The optional counter-roll cancels the composite rotation
-        // in world space, making the gun stay level with the fixed HUD; the interaction
-        // ray uses this same pose, so the barrel and the ray still agree on screen.
-        if (VRManager.handsRoll && head != null)
+        // The gun is inside the rolled world texture, so without this it rolls with the
+        // world (XOPS's handsRoll=false). Counter-rotating it about the camera-forward
+        // axis cancels the composite rotation exactly, keeping the gun fixed on screen
+        // with the HUD. The interaction ray uses this same pose, so the barrel and the
+        // ray still agree on screen. This is the default (owner: a rolling gun makes the
+        // whole body feel like it is spinning).
+        //
+        // When the full-res gun camera is active the model must stay raw: that camera
+        // draws it after the composite. GetDominantRay applies the counter to the ray
+        // there instead, so the world ray still matches the fixed overlay.
+        if (VRManager.handsRoll && head != null && !VRGunCamera.Active)
+            CounterRoll(ref pos, ref rot, head);
+        return true;
+    }
+
+    // Ray-only variant: keeps the world-space interaction ray aligned with the fixed
+    // full-res gun overlay while that overlay ignores the composite rotation.
+    public static bool GetDominantRay(out Vector3 pos, out Quaternion rot)
+    {
+        if (!GetDominantPose(out pos, out rot)) return false;
+        if (VRManager.handsRoll && VRGunCamera.Active)
         {
-            float deg = VRWorldScaler.CompositeRollDeg;
-            if (Mathf.Abs(deg) > 0.01f)
-            {
-                Quaternion counter = Quaternion.AngleAxis(-deg, head.transform.forward);
-                pos = head.transform.position + counter * (pos - head.transform.position);
-                rot = counter * rot;
-            }
+            Camera head = FindHeadCamera();
+            if (head != null) CounterRoll(ref pos, ref rot, head);
         }
         return true;
+    }
+
+    static void CounterRoll(ref Vector3 pos, ref Quaternion rot, Camera head)
+    {
+        float deg = VRWorldScaler.CompositeRollDeg;
+        if (Mathf.Abs(deg) <= 0.01f) return;
+        Quaternion counter = Quaternion.AngleAxis(-deg, head.transform.forward);
+        pos = head.transform.position + counter * (pos - head.transform.position);
+        rot = counter * rot;
     }
 }

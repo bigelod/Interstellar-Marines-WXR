@@ -113,6 +113,20 @@ public class VRManager : BaseUnityPlugin
     // pass renders fewer pixels. 0.5 = 640x480 world in a 1280x960 window. 1.0 disables
     // the mechanism. This is the XOPS-WXR trick: low-res world, full-res UI.
     public static float worldRenderScale = 0.5f;
+    // Fixed native size for the 3D world render target. When both are non-zero they
+    // override world_render_scale; the quad is still upscaled to the full display, so
+    // this is a direct "render the game cameras at 640x480" performance setting. 0,0
+    // keeps the scale-based behaviour.
+    public static int worldNativeWidth = 0;
+    public static int worldNativeHeight = 0;
+    // Render the first-person weapon at full window resolution in its own camera while
+    // the world/body stay on the low-res target. See VRGunCamera.cs. Has no effect when
+    // the world composite is off.
+    public static bool gunFullRes = true;
+    // The composite quad is drawn larger than the window so a head roll does not expose
+    // black corners at the edges. It crops the world edges by the same factor; 1.0 is
+    // exact window size. Adjustable from the VR Settings "Overscan" row.
+    public static float quadOverscale = 1.25f;
     // Head roll. The game camera is rendered with yaw/pitch only, and the low-res world
     // composite is rotated by the head's roll in VRWorldScaler. The world and the gun
     // (both in that texture) roll with the head; the visor HUD is drawn afterwards and
@@ -123,9 +137,9 @@ public class VRManager : BaseUnityPlugin
     public static float headRollSign = -1f;
     // XOPS leaves the hands/gun inside the rolled world texture, so they roll with
     // the world. Set this true to counter-rotate the gun in world space instead, so it
-    // stays level with the fixed HUD like a viewmodel. XOPS tried that and found the
-    // hands swing on every tilt, so it is off by default.
-    public static bool handsRoll = false;
+    // stays fixed on screen with the HUD. The owner wants the fixed viewmodel: a gun
+    // that rolls with the world reads as the whole body spinning.
+    public static bool handsRoll = true;
     // Shadows. Only the player's helmet lamp casts any (VRLightTamer), and it casts them
     // at this distance and resolution. 0=Low, 1=Medium, 2=High, 3=VeryHigh.
     public static float shadowDistance = 10f;
@@ -326,6 +340,10 @@ public class VRManager : BaseUnityPlugin
                 if(k=="render_width" || k=="renderwidth"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 320 && n <= 4096))) renderWidth = n; }
                 if(k=="render_height" || k=="renderheight"){ int n; if(int.TryParse(v, out n) && (n == 0 || (n >= 240 && n <= 4096))) renderHeight = n; }
                 if(k=="world_render_scale" || k=="worldscale" || k=="world_scale"){ float f; if(float.TryParse(v, out f) && f >= 0.25f && f <= 1f) worldRenderScale = f; }
+                if(k=="world_width" || k=="worldwidth" || k=="world_native_width"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 4096) worldNativeWidth = n; }
+                if(k=="world_height" || k=="worldheight" || k=="world_native_height"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 4096) worldNativeHeight = n; }
+                if(k=="gun_fullres" || k=="gunfullres" || k=="fullres_gun"){ gunFullRes = (v=="true" || v=="1" || v=="yes"); }
+                if(k=="quad_overscale" || k=="quadoverscale" || k=="overscale" || k=="quad_scale"){ float f; if(float.TryParse(v, out f) && f >= 1f && f <= 1.5f) quadOverscale = f; }
                 if(k=="head_roll" || k=="headroll" || k=="roll"){ headRoll = (v=="true" || v=="1" || v=="yes"); }
                 if(k=="roll_sign" || k=="rollsign"){ float f; if(float.TryParse(v, out f)) headRollSign = (f < 0f) ? -1f : 1f; }
                 if(k=="hands_roll" || k=="hand_roll" || k=="handsroll"){ handsRoll = (v=="true" || v=="1" || v=="yes"); }

@@ -22,7 +22,7 @@ using UnityEngine;
 // It used to be one column of nineteen rows at 5.5% of screen height each, which is
 // 1.05 screens tall - so the bottom of it, Close button included, was off the panel and
 // then off the visible area again. The list only grows, so the layout has to be one
-// that scales: two columns at 4.5% fit twenty-two rows in about 61% of the height,
+// that scales: two columns at 4.2% fit twenty-four rows in about 61% of the height,
 // inside the 62% the headset actually shows. Scrolling was the alternative and was rejected - dragging
 // a scrollbar through the runtime's pointer emulation is far worse than clicking a
 // button, and nothing here benefits from being hidden.
@@ -38,7 +38,7 @@ public class VRTuneMenu : MonoBehaviour
     // owner confirmed on 1 Nov that the green HUD sits exactly on the top and bottom
     // edges of the visible area, so the HUD's own scale is a measured proxy for it.
     const float SAFE = 0.62f;
-    const int ROWS_PER_COLUMN = 11;
+    const int ROWS_PER_COLUMN = 12;
 
     // Offered as whole presets rather than two independent width and height rows,
     // because most of the pairs those would let you build are not worth rendering.
@@ -46,6 +46,12 @@ public class VRTuneMenu : MonoBehaviour
     // repainted across the panel, so it is paid for more than once.
     static readonly int[] RES_W = new int[] { 0, 1024, 1280, 1280, 1400, 1600 };
     static readonly int[] RES_H = new int[] { 0, 768, 960, 1024, 1400, 1200 };
+
+    // Native size of the 3D world camera's render target. The quad is stretched to the
+    // display either way, so these are direct performance presets. 0 = window/off.
+    // 4:3 to match the 1280x960 window; a different aspect would be stretched by the
+    // full-screen quad, so keep them 4:3.
+    static readonly int[] NATIVE_W = new int[] { 0, 480, 640, 800, 960, 1024, 1280 };
 
     bool ShouldShow()
     {
@@ -119,7 +125,9 @@ public class VRTuneMenu : MonoBehaviour
             return;
         }
 
-        float rowH = Screen.height * 0.045f;
+        // 12 rows fit by dropping from 4.5% to 4.2% per row; the panel stays inside the
+        // measured 62% visible area with the Close button included.
+        float rowH = Screen.height * 0.042f;
         // Full safe width now, not 62% of it - the columns need the room, and this is
         // the region that was measured as visible anyway.
         Rect panel = new Rect(safe.x, safe.y, safe.width, Mathf.Min(rowH * (ROWS_PER_COLUMN + 2.5f), safe.height));
@@ -166,8 +174,13 @@ public class VRTuneMenu : MonoBehaviour
         y = y0;
         ResolutionRow(R(colBx, y, colW, rowH)); y += rowH;
 
-        // Low-res world, full-res window/HUD. 0.5 is 640x480 inside 1280x960.
-        VRManager.worldRenderScale = Row(R(colBx, y, colW, rowH), "World res", VRManager.worldRenderScale, 0.05f, 0.25f, 1.00f, "world_render_scale", "0.00"); y += rowH;
+        // Low-res world, full-res window/HUD. The preset is a native render size for
+        // WorldCamera; the composite quad upscales it to the display.
+        WorldNativeRow(R(colBx, y, colW, rowH)); y += rowH;
+
+        // Draw the composite slightly larger than the window so a head roll does not
+        // expose black corners. Crops the world edges by the same factor.
+        VRManager.quadOverscale = Row(R(colBx, y, colW, rowH), "Overscan", VRManager.quadOverscale, 0.05f, 1.00f, 1.50f, "quad_overscale", "0.00"); y += rowH;
 
         float hs = VRGlassAnchor.GetHudScale();
         float hs2 = Row(R(colBx, y, colW, rowH), "HUD scale", hs, 0.02f, 0.20f, 1.00f, "hudScale", "0.00"); y += rowH;
@@ -237,6 +250,70 @@ public class VRTuneMenu : MonoBehaviour
         VRConfigFile.Set("render_width", VRManager.renderWidth.ToString(CultureInfo.InvariantCulture));
         VRConfigFile.Set("render_height", VRManager.renderHeight.ToString(CultureInfo.InvariantCulture));
         VRManager.ApplyRenderResolution();
+    }
+
+    // Native size of the world camera render target. The quad upscales it to the
+    // display, so this is the main fill-rate lever. 0 = window/off (direct render).
+    void WorldNativeRow(Rect r)
+    {
+        int idx = CurrentNativeIndex();
+        int before = idx;
+
+        GUI.Label(new Rect(r.x, r.y, r.width * 0.46f, r.height), "Camera res", label);
+        float bw = r.width * 0.12f;
+        float bx = r.x + r.width * 0.46f;
+
+        if (GUI.Button(new Rect(bx, r.y + r.height * 0.1f, bw, r.height * 0.8f), "-", button)) idx--;
+
+        int current = NATIVE_W[Mathf.Clamp(idx, 0, NATIVE_W.Length - 1)];
+        string text = (current == 0) ? "Off" : (current + "x" + (current * 3 / 4));
+        GUI.Label(new Rect(bx + bw, r.y, r.width * 0.30f, r.height), text, value);
+
+        if (GUI.Button(new Rect(bx + bw + r.width * 0.30f, r.y + r.height * 0.1f, bw, r.height * 0.8f), "+", button)) idx++;
+
+        idx = Mathf.Clamp(idx, 0, NATIVE_W.Length - 1);
+        if (idx == before) return;
+
+        int w = NATIVE_W[idx];
+        if (w == 0)
+        {
+            VRManager.worldNativeWidth = 0;
+            VRManager.worldNativeHeight = 0;
+            VRManager.worldRenderScale = 1f;
+            VRConfigFile.Set("world_width", "0");
+            VRConfigFile.Set("world_height", "0");
+            VRConfigFile.Set("world_render_scale", "1");
+        }
+        else
+        {
+            int h = w * 3 / 4;
+            VRManager.worldNativeWidth = w;
+            VRManager.worldNativeHeight = h;
+            // Keep the scale key in step so a hand edit and this menu agree about the
+            // approximate fraction of the window being rendered.
+            VRManager.worldRenderScale = Mathf.Clamp((float)w / Mathf.Max(1, Screen.width), 0.25f, 1f);
+            VRConfigFile.Set("world_width", w.ToString(CultureInfo.InvariantCulture));
+            VRConfigFile.Set("world_height", h.ToString(CultureInfo.InvariantCulture));
+            VRConfigFile.Set("world_render_scale", VRManager.worldRenderScale.ToString("0.###", CultureInfo.InvariantCulture));
+        }
+        try { VRManagerLogger.LogInfo("[IMVR] Native camera resolution -> " + (w == 0 ? "window/off" : (w + "x" + (w * 3 / 4)))); } catch { }
+    }
+
+    int CurrentNativeIndex()
+    {
+        if (VRManager.worldNativeWidth <= 0 && VRManager.worldRenderScale >= 0.999f) return 0; // off
+        int want = VRManager.worldNativeWidth > 0
+            ? VRManager.worldNativeWidth
+            : Mathf.RoundToInt(Screen.width * VRManager.worldRenderScale);
+
+        int best = 1;
+        int bestDiff = int.MaxValue;
+        for (int i = 1; i < NATIVE_W.Length; i++)
+        {
+            int diff = Math.Abs(NATIVE_W[i] - want);
+            if (diff < bestDiff) { bestDiff = diff; best = i; }
+        }
+        return best;
     }
 
     // Nearest preset by pixel count when the configured pair is not in the list, so a

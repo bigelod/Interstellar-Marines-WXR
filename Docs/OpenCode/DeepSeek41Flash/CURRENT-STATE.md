@@ -43,22 +43,33 @@ unused `hasBase` field. The build is now clean.
 - **Config:** `shadow_distance=10`, `world_render_scale=0.5`, and
   `hud_supersample=1.1` (back to the game default).
 - **Low-res world / full-res HUD** (`VRWorldScaler.cs`): `WorldCamera` renders
-  into a 640x480 target, a depth-0.5 camera blits it, and the HUD cameras stay
-  at 1280x960. Based on the XOPS-WXR composite. The composite camera now clears
-  the backbuffer (the world camera used to be the only Skybox clear) and the
-  game's `CopyToScreenRT` is disabled while the RT is active: it copies the
-  deferred result into `RenderTexture.active`, which **is** the world RT, so it
-  fed the frame back into itself and bloom turned that into a white screen. It
-  is restored on pause and at `world_render_scale=1.0`.
+  into a 640x480 target, an off-map orthographic camera composites it as one
+  mesh quad, and the HUD cameras stay at 1280x960. Based on the XOPS-WXR
+  composite. The composite camera clears the backbuffer (the world camera used
+  to be the only Skybox clear) and the game's `CopyToScreenRT` is disabled while
+  the RT is active: it copies the deferred result into `RenderTexture.active`,
+  which **is** the world RT, so it fed the frame back into itself and bloom
+  turned that into a white screen. It is restored on pause and at
+  `world_render_scale=1.0`.
+- **Full-res gun** (`VRGunCamera.cs`): while the low-res world composite is
+  active, the weapon renderers move to layer 30, `WorldCamera` stops drawing
+  that layer, and a child camera at depth 0.75 with the same pose/FOV renders
+  only the gun at the real window resolution. It clears depth only, so it sits
+  over the upscaled world; the HUD still draws over it. The interaction ray is
+  counter-rolled independently when `hands_roll=1` so the fixed overlay and
+  the world ray still agree. `gun_fullres=0` restores the old all-in-world
+  render.
 - **Head roll** (`VRHeadTracker` + `VRWorldScaler`): when the low-res composite
   is active, the camera is given yaw/pitch only. The tracked roll is stored and
   the world texture is rotated as a 2D quad at composite time. The world and
   the gun (which is rendered into that texture) roll together; the visor HUD
   and screen-space UI are rendered afterwards and stay fixed. This is the
   XOPS-WXR split. `head_roll=0` removes roll entirely; `roll_sign` flips the
-  direction; `hands_roll=1` counter-rotates the gun so it stays level with the
-  HUD. With `world_render_scale=1.0` the camera keeps its full rotation as the
-  fallback.
+  direction; `hands_roll=1` (default) counter-rotates the gun so it stays fixed
+  on screen with the HUD. Roll is taken from the XrAPI HMD quaternion (`eulerAngles.z`)
+  and the camera uses the same quaternion with Z zeroed - no world-up projection, so
+  yaw/pitch cannot leak into the panel's roll. With `world_render_scale=1.0` the
+  camera keeps its full rotation as the fallback.
 - **UDP receiver:** reusable receive buffer, socket drain (newest packet wins),
   allocation-free ASCII parser, `AboveNormal` thread priority, and
   `Environment.TickCount` instead of Unity `Time.*` on the receive thread.
@@ -127,9 +138,12 @@ the 2 s poll reverts them.
 | `screen_fov` | `90` | `104.5` | Runtime paint angle, **not** the camera FOV (98 vertical) |
 | `render_width` / `render_height` | `1280` / `960` | same | Applied at startup and on spawn; `0` opts out |
 | `world_render_scale` | `0.5` | `0.5` | 3D world renders at 640x480 inside the 1280x960 window; HUD stays full-res. `1.0` disables |
+| `world_width` / `world_height` | `0` / `0` | `0` / `0` | Fixed native 3D camera render size; both non-zero override `world_render_scale`. The quad upscales to the display. The VR Settings **Camera res** row writes these |
+| `gun_fullres` | `1` | `true` | Weapon gets its own full-res camera on layer 30; the low-res world pass stops drawing it. Drawn over the upscaled world with depth cleared, so walls do not occlude it |
+| `quad_overscale` | `1.25` | `1.25` | Composite quad is drawn this much larger than the window, reducing black edge gaps during head roll. Crops the world edges and narrows the displayed FOV; `1.00` is exact fit. VR Settings **Overscan** row |
 | `head_roll` | `1` | `true` | XOPS-style roll: the camera is yaw/pitch only and the world composite is rotated, so the world/gun roll and the HUD stays fixed. Requires `world_render_scale < 1.0`; `0` removes head roll |
 | `roll_sign` | `-1` | `-1` | Flips the composite roll direction. `-1` matches XOPS; use `+1` if the horizon tilts the wrong way |
-| `hands_roll` | `0` | `false` | `0` = XOPS: the gun is in the rolled world texture and rolls with the world. `1` = counter-rotate the gun so it stays level with the fixed HUD |
+| `hands_roll` | `1` | `true` | `1` = counter-rotate the gun so it stays fixed on screen with the HUD (owner's choice: a gun rolling with the world reads as the whole body spinning). `0` = XOPS: the gun rides the rolled world texture and rolls with it |
 | `hud_supersample` | `1.1` | `1.1` | `HUDCamera.hudScale`; game default. The 0.5 world scale already doubles relative HUD sharpness |
 | `shadow_distance` | `10` | `10` | Matches the code default now; only the helmet lamp casts |
 | `shadow_resolution` | `0` | `0` | 0=Low … 3=VeryHigh; only the helmet lamp casts |

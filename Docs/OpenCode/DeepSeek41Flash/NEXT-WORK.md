@@ -52,9 +52,17 @@ Ask for one report covering:
 4. **3 Nov batch:** peripheral damage bands, helmet lamp shadows, interaction
    ray, HUD supersampling at 2.0, haptics.
 5. **World scale:** with `world_render_scale=0.5`, HUD text should stay sharp
-   while the world is softer. Pause/menus must not show a stale low-res frame;
-   changing resolution must recreate the RT; `1.0` must return to direct
-   rendering.
+   while the world is softer. The VR Settings **Camera res** row now offers
+   fixed native targets (480x360, 640x480, 800x600, 960x720, 1024x768,
+   1280x960, or Off); those write `world_width`/`world_height` and override
+   `world_render_scale`. The quad still upscales the target to the display; the
+   HUD stays full-res. Pause/menus must not show a stale low-res frame;
+   changing resolution must recreate the RT; `Off`/`world_render_scale=1.0`
+   must return to direct rendering. With `gun_fullres=1` the gun should stay
+   sharp while the world is soft; it is drawn over the world, so watch for it
+   clipping through walls (set `gun_fullres=0` to revert). **Overscan** (default
+   1.25) enlarges the world quad to hide roll corners; it crops the world edges
+   and zooms the image, so check the apparent FOV against `screen_fov`.
 
    **Re-test after the 7 Nov glow report.** The first device run produced a
    runaway white glow that reset on pause. Cause: `WorldCamera` was the only
@@ -70,15 +78,16 @@ Ask for one report covering:
 6. **UDP receiver:** tracking should feel the same or smoother, with no periodic
    hitch. If the log shows `UDP parse skipped`, capture the packet.
 7. **Head roll (XOPS split):** with `world_render_scale=0.5` and `head_roll=1`,
-   tilt your head sideways. The horizon and the gun should roll together while
-   the visor HUD stays upright (XOPS default, `hands_roll=0`). If you wanted the
-   gun to stay level with the HUD instead, set `hands_roll=1` and compare; XOPS
-   found that version swings on every tilt. If the horizon tilts the wrong way,
-   set `roll_sign=+1`. If the hands look glued to the view instead of rolling
-   with the world in `hands_roll=0`, check that the low-res composite is
-   actually active (`world_render_scale` below 1.0) and that the log shows the
-   world RT. With `world_render_scale=1.0`, head roll falls back to the camera
-   and the HUD rolls with it.
+   tilt your head sideways. The horizon should roll while the gun stays fixed
+   on screen with the HUD (`hands_roll=1`, the owner's setting) - the world
+   rolling past a fixed viewmodel is what sells the roll without the whole body
+   feeling like it is spinning. `hands_roll=0` is the XOPS variant where the
+   gun rides the world texture and rolls with it. **Roll comes from the raw XrAPI
+   HMD quaternion's Z Euler component; yaw and pitch must not rotate the
+   panel.** If the horizon tilts the wrong way, set `roll_sign=+1`. If the
+   hands still move in `hands_roll=1`, note whether they rotate around the
+   screen centre (camera-forward pivot) or drift. With `world_render_scale=1.0`,
+   head roll falls back to the camera and the HUD rolls with it.
 
 If it misbehaves, bisect in this order: handshake (`version`/`vr`/`system`) →
 world scaler (`world_render_scale` 1.0) → UDP parser (revert to string parser) →

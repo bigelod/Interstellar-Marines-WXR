@@ -22,14 +22,15 @@ The port runs the game fullscreen in the container, so no window-chrome handling
 
 ## Features
 
-- **6DOF head tracking** with yaw/pitch/roll; lean clamped to 0.30 m. With the low-res composite active, head roll is applied to the **world texture** (XOPS-WXR style): the world and gun roll together and the visor HUD stays upright. `head_roll=0` removes roll; `roll_sign` flips its direction; `hands_roll=1` counter-rotates the gun to stay level with the HUD.
+- **6DOF head tracking** with yaw/pitch/roll; lean clamped to 0.30 m. With the low-res composite active, head roll is applied to the **world texture** (XOPS-WXR style): the world rolls and the visor HUD stays upright. The gun is counter-rotated so it stays fixed on screen with the HUD (`hands_roll=1`, default); set `hands_roll=0` for XOPS's gun-rolls-with-the-world variant. `head_roll=0` removes roll; `roll_sign` flips its direction.
 - **Weapon at the dominant hand**, body-relative orientation, survives level changes.
 - **`flipHands=auto`** — reads `Z:/tmp/xr/system` and maps `EUREKA`/`PANTHER` -> Quest 3, `HOLLYWOOD` -> Quest 2, `SEACLIFF` -> Quest Pro. An explicit `flipHands=true/false` overrides detection.
 - **Haptics on the dominant hand**, driven by the ammo counter: 6 frames when a round is spent, 10 frames on a weapon switch. A dry trigger or a refused shot does not buzz.
 - **Auto 2D/VR switching**: title screen, menus, pause, or no local Marine -> `MODE_VR=0`; in-game -> `MODE_VR=1`.
 - **HUD scaling** via `VRHudSafeArea` (`hudScale`, default 0.60), which moves edge-anchored widgets inward instead of pinning them.
 - **HUD text supersampling** (`hud_supersample`, default 1.1 — the game's own value) via `HUDCamera.hudScale`. The low-res world already makes the HUD about 2x sharper by comparison; 2.0 is available if the text still reads soft.
-- **Low-res world, full-res HUD** (`world_render_scale`, default 0.5): `WorldCamera` renders into a 640x480 target inside the 1280x960 window; a depth-0.5 camera composites it (rotated by head roll when enabled), and the HUD/visor cameras still render at the full window resolution. `1.0` disables the mechanism. This is the XOPS-WXR split.
+- **Low-res world, full-res HUD** (`world_render_scale` default 0.5, or fixed `world_width`/`world_height`): `WorldCamera` renders into a smaller target inside the 1280x960 window; a depth-0.5 camera composites it (rotated by head roll when enabled) and upscales it to the display, while the HUD/visor cameras still render at the full window resolution. The VR Settings **Camera res** row offers 480p/640x480/800x600/960x720/1024x768/1280x960 or window/off; **Overscan** enlarges the quad (default 1.25) to hide roll corners at the cost of cropping the world edges. `1.0`/off disables the mechanism. This is the XOPS-WXR split.
+- **Full-res weapon over a low-res world**: while the composite is active, the gun moves to its own layer and a full-window camera (same pose/FOV as `WorldCamera`) draws it after the world quad. The world/body stay at the native target; the gun stays sharp. `gun_fullres=0` puts it back in the world pass.
 - **Sync pixel** (10 px) for WinlatorXR frame pacing.
 - **In-headset tuning menu**: pause, click **VR Settings**. Every knob is a row and every change is written back to `config.txt`.
 - **Comfort**: sprint bob removed, head recoil/lurch/visor bob suppressed in VR, blinders-on-damage replaced with peripheral red bands.

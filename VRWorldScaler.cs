@@ -13,8 +13,10 @@ using UnityEngine;
 //   * HelmetCamera (glass/HUD, depth 1) and CAM Camera (uGUI, depth 1) still render at
 //     the real window resolution, so the visor and its text are untouched.
 //
-// The composite camera owns nothing in the scene: it clears to black, draws no layers,
-// and only blits the RT. It is created once and survives level changes.
+// The composite camera is parked far outside the level, has an identity transform, and
+// draws exactly one quad on its own layer. The quad's only transform is the Z roll; it
+// cannot inherit the world camera's yaw/pitch the way an immediate-mode GL pass did.
+// It is created once and survives level changes.
 //
 // The game's own CopyToScreenRT is switched off while this is active; left on, it copies
 // the deferred lighting result into RenderTexture.active, which is this RT, and feeds the
@@ -25,6 +27,7 @@ public static class VRWorldScaler
 {
     static RenderTexture rt;
     static Camera blitCam;
+    static GameObject quadGo;
     static Camera worldCam;
     static int rtW;
     static int rtH;
@@ -42,6 +45,30 @@ public static class VRWorldScaler
     static bool copyToScreenWeDisabled;
 
     public static RenderTexture WorldRT { get { return rt; } }
+
+    // True whenever the low-res world composite should be running. A fixed native size
+    // overrides the scale, so world_render_scale=1.0 must not disable the head-roll split
+    // when world_width/world_height are set.
+    public static bool CompositeWanted
+    {
+        get
+        {
+            return (VRManager.worldNativeWidth > 0 && VRManager.worldNativeHeight > 0)
+                || VRManager.worldRenderScale < 0.999f;
+        }
+    }
+
+    // True only while the composite is actually replacing the world on screen. The
+    // full-resolution gun camera hangs off this so it is never active in menus/pause.
+    public static bool CompositeActive
+    {
+        get
+        {
+            return blitCam != null && blitCam.enabled
+                && rt != null && worldCam != null
+                && worldCam.targetTexture == rt;
+        }
+    }
 
     // Screen-space roll applied to the world composite, in degrees. VRHeadTracker strips
     // this from the camera and stores the head's roll; the world texture is rotated here
@@ -62,6 +89,10 @@ public static class VRWorldScaler
 
         GameObject go = new GameObject("IMVR_WorldBlit");
         Object.DontDestroyOnLoad(go);
+        // Far outside the level: the quad is layer 31, and WorldCamera's culling mask
+        // happens to include that layer. At the map origin the world camera could draw
+        // the quad by accident; ten kilometres below the floor it cannot.
+        go.transform.position = new Vector3(0f, -10000f, 0f);
 
         blitCam = go.AddComponent<Camera>();
         blitCam.depth = 0.5f;                          // after WorldCamera (0), before HUD (1)
@@ -71,7 +102,7 @@ public static class VRWorldScaler
         // frame and can accumulate. Clear here, then blit the fresh world over it.
         blitCam.clearFlags = CameraClearFlags.SolidColor;
         blitCam.backgroundColor = Color.black;
-        blitCam.cullingMask = 0;                       // draws no scene objects
+        blitCam.cullingMask = (1 << 31);               // only the composite quad
         blitCam.orthographic = true;
         blitCam.orthographicSize = 1f;
         blitCam.nearClipPlane = 0.01f;
@@ -82,7 +113,21 @@ public static class VRWorldScaler
         try { blitCam.renderingPath = RenderingPath.Forward; } catch { }
         blitCam.enabled = false;
 
-        go.AddComponent<VRWorldBlit>();
+        // A real quad mesh in front of an orthographic camera. This is deliberately not
+        // an immediate-mode GL draw: OnPostRender runs right after WorldCamera and was
+        // inheriting that camera's yaw/pitch, so the "2D" panel tilted on X/Y as well as
+        // rolling. A mesh under an identity-view orthographic camera can only be moved by
+        // its own transform, which this code keeps to a Z rotation.
+        quadGo = new GameObject("IMVR_WorldQuad");
+        quadGo.layer = 31;
+        quadGo.transform.SetParent(go.transform, false);
+        quadGo.transform.localPosition = new Vector3(0f, 0f, 0.5f);
+        quadGo.transform.localRotation = Quaternion.identity;
+        quadGo.transform.localScale = new Vector3(
+            2f * ((float)Screen.width / Mathf.Max(1, Screen.height)), 2f, 1f);
+        quadGo.AddComponent<VRWorldBlit>();
+        quadGo.SetActive(false);
+
         try { VRManagerLogger.LogInfo("[IMVR] World scaler ready (low-res world, full-res HUD)"); } catch { }
     }
 
@@ -99,16 +144,21 @@ public static class VRWorldScaler
             return;
         }
 
+        bool native = VRManager.worldNativeWidth > 0 && VRManager.worldNativeHeight > 0;
         float scale = Mathf.Clamp(VRManager.worldRenderScale, 0.25f, 1f);
-        if (scale >= 0.999f)
+        if (!native && scale >= 0.999f)
         {
             Disable(cam);
             return;
         }
 
         Ensure();
-        int w = Mathf.Max(64, Mathf.RoundToInt(Screen.width * scale));
-        int h = Mathf.Max(48, Mathf.RoundToInt(Screen.height * scale));
+        int w = native
+            ? Mathf.Clamp(VRManager.worldNativeWidth, 64, 4096)
+            : Mathf.Max(64, Mathf.RoundToInt(Screen.width * scale));
+        int h = native
+            ? Mathf.Clamp(VRManager.worldNativeHeight, 48, 4096)
+            : Mathf.Max(48, Mathf.RoundToInt(Screen.height * scale));
         if (rt == null || rtW != w || rtH != h) Recreate(w, h);
         if (rt == null) return;
 
@@ -119,7 +169,7 @@ public static class VRWorldScaler
         worldCam = cam;
         SuppressCopyToScreen(cam);
         if (cam.targetTexture != rt) cam.targetTexture = rt;
-        if (blitCam != null && !blitCam.enabled) blitCam.enabled = true;
+        SetCompositeActive(true);
     }
 
     // Called from VRInputRunner.Update after the mode for this frame is known.
@@ -133,14 +183,23 @@ public static class VRWorldScaler
             && rt != null
             && worldCam != null
             && worldCam.targetTexture == rt
-            && VRManager.worldRenderScale < 0.999f;
-        if (blitCam.enabled != active) blitCam.enabled = active;
+            && CompositeWanted;
+        SetCompositeActive(active);
+    }
+
+    static void SetCompositeActive(bool active)
+    {
+        if (blitCam != null && blitCam.enabled != active) blitCam.enabled = active;
+        // The quad is a child of the camera, not the camera itself. Leaving it active
+        // while the camera is off would let other cameras (WorldCamera includes layer 31)
+        // find it, so it follows the same on/off state.
+        if (quadGo != null && quadGo.activeSelf != active) quadGo.SetActive(active);
     }
 
     static void Disable(Camera cam)
     {
         if (cam != null && rt != null && cam.targetTexture == rt) cam.targetTexture = null;
-        if (blitCam != null && blitCam.enabled) blitCam.enabled = false;
+        SetCompositeActive(false);
         if (worldCam == cam) worldCam = null;
         RestoreCopyToScreen();
     }
@@ -189,7 +248,7 @@ public static class VRWorldScaler
 
     static void Recreate(int w, int h)
     {
-        if (blitCam != null) blitCam.enabled = false;
+        SetCompositeActive(false);
         if (worldCam != null && worldCam.targetTexture == rt) worldCam.targetTexture = null;
         if (rt != null)
         {
@@ -223,16 +282,26 @@ public static class VRWorldScaler
     }
 }
 
-// The blit itself. The world is drawn as a textured quad so the composite can be
-// rolled by the head: rotating the quad is the Unity equivalent of XOPS-WXR rotating
-// the presented 640x480 game sprite in Present. The camera clears to black first, so
-// the corners opened up by the rotation are black, not stale frame.
+// The blit itself. A real mesh under the orthographic composite camera, with only a Z
+// rotation on its own transform. This is deliberately not an immediate-mode GL draw:
+// OnPostRender runs immediately after WorldCamera and inherited that camera's yaw/pitch
+// view matrix, so the "2D" panel tilted on X/Y as well as rolling. A mesh in a camera
+// whose transform is identity (and which is parked far outside the level) has no such
+// coupling: its only motion is the localRotation set below.
 public class VRWorldBlit : MonoBehaviour
 {
     Material mat;
 
     void Awake()
     {
+        gameObject.layer = 31;
+
+        MeshFilter mf = GetComponent<MeshFilter>();
+        if (mf == null) mf = gameObject.AddComponent<MeshFilter>();
+        MeshRenderer mr = GetComponent<MeshRenderer>();
+        if (mr == null) mr = gameObject.AddComponent<MeshRenderer>();
+        mf.sharedMesh = BuildQuad();
+
         // Hidden/BlitCopy is the material Graphics.Blit itself uses: opaque, Cull Off,
         // ZTest Always, and guaranteed to be present in a player build. Unlit/Texture is
         // the fallback for a stripped build; Sprites/Default is the last resort.
@@ -243,68 +312,52 @@ public class VRWorldBlit : MonoBehaviour
         {
             mat = new Material(s);
             mat.hideFlags = HideFlags.HideAndDontSave;
+            mr.sharedMaterial = mat;
             try { VRManagerLogger.LogInfo("[IMVR] World scaler blit shader: " + s.name); } catch { }
         }
         else
         {
             try { VRManagerLogger.LogWarn("[IMVR] World scaler: no blit shader found"); } catch { }
         }
+
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = false;
     }
 
-    void OnPostRender()
+    void LateUpdate()
     {
-        RenderTexture src = VRWorldScaler.WorldRT;
-        if (src == null) return;
-        // Never read from the texture we are writing to. That is a feedback loop, not a copy.
-        if (RenderTexture.active == src) return;
+        if (mat != null) mat.mainTexture = VRWorldScaler.WorldRT;
 
-        float roll = VRWorldScaler.CompositeRollDeg;
-        if (Mathf.Abs(roll) < 0.05f || mat == null)
-        {
-            Graphics.Blit(src, (RenderTexture)null);
-            return;
-        }
+        // Only Z. The camera's transform is identity, so nothing else can tilt this quad.
+        transform.localRotation = Quaternion.Euler(0f, 0f, VRWorldScaler.CompositeRollDeg);
 
-        // Rotate the world image about the screen centre with immediate-mode GL. The
-        // camera itself has no roll; this is what puts it back on the world only,
-        // leaving the HUD cameras upright. This is the same GL path SyncPixelQuad uses,
-        // so it does not depend on any RenderTexture.active state left by the game.
-        mat.mainTexture = src;
-        mat.SetPass(0);
-        GL.Clear(true, true, Color.black);
-
-        float w = Screen.width;
-        float h = Screen.height;
-        GL.PushMatrix();
-        GL.LoadPixelMatrix(0f, w, 0f, h);
-        GL.MultMatrix(Matrix4x4.TRS(
-            new Vector3(w * 0.5f, h * 0.5f, 0f),
-            Quaternion.Euler(0f, 0f, roll),
-            Vector3.one));
-        DrawQuad(w * 0.5f, h * 0.5f, false);
-        // Back-face order too: Unlit/Texture culls, and we do not want the image to
-        // disappear if the fallback shader's winding differs from BlitCopy's.
-        DrawQuad(w * 0.5f, h * 0.5f, true);
-        GL.PopMatrix();
+        float aspect = (float)Screen.width / Mathf.Max(1, Screen.height);
+        float over = Mathf.Clamp(VRManager.quadOverscale, 1f, 1.5f);
+        transform.localScale = new Vector3(2f * aspect * over, 2f * over, 1f);
     }
 
-    static void DrawQuad(float hw, float hh, bool reverse)
+    static Mesh BuildQuad()
     {
-        GL.Begin(GL.QUADS);
-        if (!reverse)
+        Mesh m = new Mesh();
+        m.name = "IMVR_WorldQuad";
+        m.hideFlags = HideFlags.HideAndDontSave;
+        m.vertices = new Vector3[]
         {
-            GL.TexCoord2(0f, 0f); GL.Vertex3(-hw, -hh, 0f);
-            GL.TexCoord2(1f, 0f); GL.Vertex3( hw, -hh, 0f);
-            GL.TexCoord2(1f, 1f); GL.Vertex3( hw,  hh, 0f);
-            GL.TexCoord2(0f, 1f); GL.Vertex3(-hw,  hh, 0f);
-        }
-        else
+            new Vector3(-0.5f, -0.5f, 0f),
+            new Vector3( 0.5f, -0.5f, 0f),
+            new Vector3( 0.5f,  0.5f, 0f),
+            new Vector3(-0.5f,  0.5f, 0f)
+        };
+        m.uv = new Vector2[]
         {
-            GL.TexCoord2(0f, 1f); GL.Vertex3(-hw,  hh, 0f);
-            GL.TexCoord2(1f, 1f); GL.Vertex3( hw,  hh, 0f);
-            GL.TexCoord2(1f, 0f); GL.Vertex3( hw, -hh, 0f);
-            GL.TexCoord2(0f, 0f); GL.Vertex3(-hw, -hh, 0f);
-        }
-        GL.End();
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(1f, 1f),
+            new Vector2(0f, 1f)
+        };
+        // Both windings: whichever side the material culls, the visible face still draws.
+        m.triangles = new int[] { 0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2 };
+        m.RecalculateBounds();
+        return m;
     }
 }

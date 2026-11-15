@@ -22,7 +22,8 @@ commit wins, because that audit predates three commits.
 | `VRLightTamer.cs` | Silences every light's shadows except the helmet lamp |
 | `VRHeadLamp.cs` | Owns one helmet lamp parented to the head camera |
 | `VRClipGuard.cs` | Forces occlusion culling off while the camera is inside geometry; applies far clip and fog |
-| `VRWorldScaler.cs` | Renders `WorldCamera` into a low-res RT and blits it full-screen; the HUD cameras stay at window resolution |
+| `VRWorldScaler.cs` | Renders `WorldCamera` into a low-res RT and composites it full-screen; the HUD cameras stay at window resolution |
+| `VRGunCamera.cs` | Child full-window camera that renders the weapon on layer 30 after the world composite, keeping the gun sharp |
 | `VRPainOverlay.cs` | Suppresses the game's per-camera red flash and draws peripheral bands once |
 | `SyncPixelQuad.cs` | Global overlay camera + immediate-mode `GL` red sync pixel |
 | `VRConfigFile.cs` | Writes one key back to `config.txt`, preserving comments and duplicates |
@@ -72,6 +73,8 @@ Update (IMVR_InputRunner)
       XRAPI.UpdateVRModeFromGameState  -> MODE_VR + outbound 7278 packet
       XRAPI.TickHaptics                -> decay after the send
   VRWorldScaler.Tick           enable the low-res compositor only in VR gameplay
+  VRGunCamera.Tick             full-res gun camera on the composite, layer 30 excluded
+                               from WorldCamera
 
 HUDCamera.Update postfix
   only when inVR: distort = 0; hudScale = hud_supersample (on change)
@@ -95,10 +98,14 @@ LateUpdate
       restore original parent when visor Open
       do NOT scale HUD UI Root
 
-OnPostRender (VRWorldScaler's depth-0.5 camera)
-  clear to black; Graphics.Blit when roll is ~0, otherwise draw the world RT as a
-  GL quad rotated about the screen centre by headRoll * headRollSign
-  before the HUD cameras; never reads the texture it draws to
+Camera render (VRWorldScaler's depth-0.5 camera)
+  clear to black, then draw the world RT as a mesh quad whose localRotation is
+  only Quaternion.Euler(0,0,headRoll * headRollSign); camera transform is identity
+  and parked far outside the level, before the HUD cameras
+
+Camera render (VRGunCamera, depth 0.75)
+  clear depth only; draw layer 30 (the weapon) at full window resolution over the
+  upscaled world; HUD cameras at depth 1 still draw over it
 
 OnPostRender (SyncPixelQuad's depth-1000 camera)
   VRPainOverlay.Draw   peripheral bands, once per frame
@@ -276,15 +283,33 @@ it; the faint alpha tint is the remaining glass cue.
   Screen.fullScreen)` at startup and on spawn. `render_width=0` opts out.
 - **World scaler:** `VRWorldScaler` sets `WorldCamera.targetTexture` to a
   `Screen * world_render_scale` RT (default 0.5 = 640x480 in a 1280x960
-  window). A depth-0.5 camera clears to black, then draws the RT as a textured
-  quad before `HelmetCamera` / `CAM Camera` at depth 1. When head roll is on,
-  the quad is rotated about the screen centre by the tracked roll, so the world
-  and gun roll while the HUD stays fixed (XOPS-WXR's present-time sprite
-  rotation). The HUD cameras keep using `Screen` dimensions, so the visor and
-  text stay full-resolution. `hands_roll=1` counter-rotates
-  `VRHands.GetDominantPose` (and the interaction ray) by the negative composite
-  roll so the gun stays level with the HUD; the default `0` is XOPS: the gun
-  rolls with the world. `1.0` restores direct rendering and leaves the
+  window), or to a fixed `world_width * world_height` when both are non-zero.
+  The VR Settings **Camera res** row writes those fixed dimensions; the quad
+  upscales whichever target to the display. It is drawn
+  `quad_overscale` times larger than the window (default 1.25) so a roll does
+  not expose black corners; the same factor crops the world edges and narrows
+  the gun camera's FOV to match. A depth-0.5 orthographic camera,
+  parked far outside the level and
+  with an identity transform, clears to black and renders one mesh quad on
+  layer 31 before `HelmetCamera` / `CAM Camera` at depth 1. The quad's only
+  transform is a Z rotation from the tracked head roll, so the panel cannot
+  inherit the world camera's yaw/pitch. (An earlier immediate-mode `GL` version
+  did: `OnPostRender` follows WorldCamera and the quad picked up its view
+  matrix, tilting the panel on X/Y.) When head roll is on, the quad rotates, so
+  the world and gun roll while the HUD stays fixed (XOPS-WXR's present-time
+  sprite rotation). The HUD cameras keep using `Screen` dimensions, so the
+  visor and text stay full-resolution. `hands_roll=1` (default, owner's
+  request) counter-rotates `VRHands.GetDominantPose` (and the interaction ray)
+  by the negative composite roll so the gun stays fixed on screen with the HUD;
+  `0` is XOPS, where the gun rides the rolled world and rolls with it. Roll is
+  read straight from the XrAPI HMD quaternion: `eulerAngles.z` is the local
+  roll, and the camera gets the same quaternion with Z zeroed. There is no
+  world-up projection, so yaw and pitch cannot leak into the quad's roll.
+  `gun_fullres=1` (default) moves the weapon to layer 30 and renders it from a
+  depth-0.75 child camera at full window resolution; the world camera excludes
+  that layer. The gun overlay is fixed when `hands_roll=1`, and
+  `VRHands.GetDominantRay` counter-rolls the interaction ray separately so aim
+  still matches the world image. `1.0` restores direct rendering and leaves the
   full rotation on the camera. The game's `CopyToScreenRT` is disabled while
   the RT is active: it copies into `RenderTexture.active`, which is the RT, so
   it would feed the frame back into itself; it is restored on pause and at

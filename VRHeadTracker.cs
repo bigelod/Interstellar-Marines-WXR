@@ -1,9 +1,13 @@
 using UnityEngine;
+[DefaultExecutionOrder(-100)]
 public class VRHeadTracker : MonoBehaviour
 {
     Vector3 baseLocalPos;
     Quaternion baseLocalRot;
     Camera cam;
+    static float lastRollLog = -999f;
+    static bool hasRollState = false;
+    static float lastRollDeg = 0f;
     void Awake() { baseLocalPos = transform.localPosition; baseLocalRot = transform.localRotation; cam = GetComponent<Camera>(); }
     void Start()
     {
@@ -41,25 +45,47 @@ public class VRHeadTracker : MonoBehaviour
             // rotation stays on the camera - the old behaviour remains the fallback.
             Quaternion raw = baseLocalRot * hRot;
             bool compositeRoll = VRManager.headRoll
-                && VRManager.worldRenderScale < 0.999f
+                && VRWorldScaler.CompositeWanted
                 && VRManagerState.inVR
                 && Marine.LocalMarine != null;
 
             if (compositeRoll)
             {
+                // Roll comes straight out of the XrAPI HMD quaternion. Do not derive it
+                // from a world-space up vector: that is what made yaw and pitch leak into
+                // the quad's roll. The quaternion is already the headset's orientation;
+                // Unity's ZXY Euler decomposition gives us its local roll and the same
+                // rotation with Z zeroed, which keeps the forward vector unchanged.
                 float roll;
                 Quaternion noRoll;
-                SplitRoll(raw, baseLocalRot * Vector3.up, out noRoll, out roll);
-                transform.localRotation = noRoll;
+                SplitRoll(hRot, true, out noRoll, out roll);
+                transform.localRotation = baseLocalRot * noRoll;
                 VRManagerState.headRollRad = roll;
+
+                // Temporary diagnostic: raw quaternion only, so a report can show whether
+                // z is actually moving when only yaw/pitch changes.
+                float now;
+                try { now = Time.realtimeSinceStartup; } catch { now = 0f; }
+                if (now - lastRollLog > 1f)
+                {
+                    lastRollLog = now;
+                    Vector3 e = hRot.eulerAngles;
+                    try {
+                        VRManagerLogger.LogInfo("[IMVR] Raw head euler x=" + e.x.ToString("F1")
+                            + " y=" + e.y.ToString("F1") + " z=" + e.z.ToString("F1")
+                            + " q=" + hRot.x.ToString("F3") + "," + hRot.y.ToString("F3")
+                            + "," + hRot.z.ToString("F3") + "," + hRot.w.ToString("F3")
+                            + " -> quad roll=" + (roll * Mathf.Rad2Deg).ToString("F1"));
+                    } catch { }
+                }
             }
             else if (!VRManager.headRoll)
             {
                 // Head roll explicitly off: keep the view upright everywhere.
                 float roll;
                 Quaternion noRoll;
-                SplitRoll(raw, baseLocalRot * Vector3.up, out noRoll, out roll);
-                transform.localRotation = noRoll;
+                SplitRoll(hRot, false, out noRoll, out roll);
+                transform.localRotation = baseLocalRot * noRoll;
                 VRManagerState.headRollRad = 0f;
             }
             else
@@ -79,38 +105,38 @@ public class VRHeadTracker : MonoBehaviour
         VRWorldScaler.Apply(cam);
     }
 
-    // Split a head rotation into "yaw/pitch only" and the roll left over about its own
-    // forward axis. upRef is the parent/base up vector, so a fixed helmet-mount tilt is
-    // preserved and only the tracked roll is removed.
-    static void SplitRoll(Quaternion raw, Vector3 upRef, out Quaternion noRoll, out float rollRad)
+    // Roll straight from the XrAPI HMD quaternion. Unity's Euler decomposition is ZXY:
+    // z is the local roll and removing it with a local-Z quaternion multiply leaves the
+    // forward vector untouched. No world-up projection, so yaw and pitch cannot leak
+    // into the quad's roll.
+    //
+    // hold=true is the gameplay path: a 0.5 degree deadband kills the tiny yaw/pitch
+    // coupling, and the last roll is held within 10 degrees of straight up/down, where
+    // Euler Z is gimbal-locked. The camera still removes the same held angle, so the
+    // view stays coherent while the quad stops jittering.
+    static void SplitRoll(Quaternion raw, bool hold, out Quaternion noRoll, out float rollRad)
     {
-        Vector3 f = raw * Vector3.forward;
-        Vector3 actualUp = raw * Vector3.up;
+        Vector3 e = raw.eulerAngles;
+        float pitch = Mathf.DeltaAngle(0f, e.x);
+        float rollDeg = Mathf.DeltaAngle(0f, e.z);
 
-        // World/base up projected onto the plane perpendicular to the view forward.
-        Vector3 up0 = upRef - f * Vector3.Dot(upRef, f);
-        if (up0.sqrMagnitude < 0.000001f)
+        if (hold)
         {
-            // Looking straight up or down: the reference is degenerate, so use another
-            // stable axis. Roll is undefined there anyway; keep the frame deterministic.
-            Vector3 fallback = (Mathf.Abs(Vector3.Dot(f, Vector3.forward)) > 0.999f)
-                ? Vector3.right : Vector3.forward;
-            up0 = fallback - f * Vector3.Dot(fallback, f);
+            if (hasRollState && Mathf.Abs(Mathf.DeltaAngle(lastRollDeg, rollDeg)) < 0.5f)
+                rollDeg = lastRollDeg;
+            if (hasRollState && Mathf.Abs(pitch) > 80f)
+                rollDeg = lastRollDeg;
+
+            lastRollDeg = rollDeg;
+            hasRollState = true;
+        }
+        else
+        {
+            // "Head roll off" has no state: remove the full raw roll every frame.
+            hasRollState = false;
         }
 
-        if (up0.sqrMagnitude < 0.000001f)
-        {
-            // Degenerate even after the fallback (looking exactly along it). There is no
-            // meaningful roll here; leave the rotation alone.
-            noRoll = raw;
-            rollRad = 0f;
-            return;
-        }
-
-        up0.Normalize();
-        float angle = Vector3.Angle(up0, actualUp);
-        float sign = Mathf.Sign(Vector3.Dot(Vector3.Cross(up0, actualUp), f));
-        rollRad = angle * sign * Mathf.Deg2Rad;
-        noRoll = Quaternion.LookRotation(f, up0);
+        rollRad = rollDeg * Mathf.Deg2Rad;
+        noRoll = raw * Quaternion.Inverse(Quaternion.AngleAxis(rollDeg, Vector3.forward));
     }
 }

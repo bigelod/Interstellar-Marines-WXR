@@ -121,6 +121,26 @@ render_height=960
 # Re-read every 2s, so tune it live.
 world_render_scale=0.5
 
+# Fixed native size for the 3D world camera. When both are non-zero they override
+# world_render_scale; the composite quad is still upscaled to the full display.
+# This is the performance setting: 640x480 renders 307k pixels, 960x720 renders
+# 691k, window/off renders at the full display. 4:3 so the quad does not stretch.
+# The VR Settings menu row "Camera res" writes these.
+world_width=0
+world_height=0
+
+# Render the first-person weapon at full window resolution in its own camera while
+# the world/body stay on the low-res target. This keeps the gun crisp and leaves
+# the world cheap. It is drawn over the upscaled world with depth cleared, so it
+# cannot be occluded by walls; turn it off if that trade is worse than the blur.
+gun_fullres=1
+
+# Draw the composite quad this much larger than the window, about the screen centre.
+# 1.25 leaves fewer black edge gaps when the head rolls; it also crops the world
+# edges by the same factor and narrows the displayed FOV. 1.00 is exact fit.
+# Adjustable from the VR Settings "Overscan" row.
+quad_overscale=1.25
+
 # Head roll, XOPS-WXR style. The camera is rendered with yaw/pitch only and the
 # world render texture above is rotated by the head's roll at composite time, so
 # the world and the gun roll while the visor HUD stays fixed. This needs
@@ -128,10 +148,10 @@ world_render_scale=0.5
 # roll_sign=-1 matches XOPS; flip to +1 if the horizon tilts the wrong way.
 head_roll=1
 roll_sign=-1
-# 0 (XOPS default) = the gun is inside the rolled world texture and rolls with
-# the world. 1 = counter-rotate the gun so it stays level with the fixed HUD,
-# like a viewmodel. XOPS found the counter-rotated version swings on every tilt.
-hands_roll=0
+# 0 = XOPS: the gun is inside the rolled world texture and rolls with the world.
+# 1 = counter-rotate the gun so it stays fixed on screen with the HUD. The owner
+#     wants 1: a gun that rolls with the world reads as the whole body spinning.
+hands_roll=1
 
 # Supersampling for the visor HUD's own render target, written into
 # HUDCamera.hudScale. That field is NOT a screen-size knob despite the name: the

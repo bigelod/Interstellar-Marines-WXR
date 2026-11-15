@@ -50,7 +50,7 @@ public static class VRHandInteract
         {
             Vector3 p;
             Quaternion r;
-            if (VRHands.GetDominantPose(out p, out r))
+            if (VRHands.GetDominantRay(out p, out r))
             {
                 origin = p;
                 direction = r * Vector3.forward;
