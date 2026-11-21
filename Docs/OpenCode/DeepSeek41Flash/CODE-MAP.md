@@ -260,10 +260,14 @@ it; the faint alpha tint is the remaining glass cue.
   `GL` quad in screen-space pixels with blending off and green 0. Size comes
   from `sync_pixel_size` (default 10). When no packets have arrived it uses
   `Time.frameCount % 256` so the runtime can still calibrate. [src]
-- **Outbound FOV:** `fov_h` / `fov_v` are the angles on the 7278 packet. `0`
-  resolves per axis: `system` file FOV if present, else the inbound packet's
-  `fovH`/`fovV` half-angle tangents converted to degrees, else 104.5. The VR
-  Settings **FOV H/V** rows show the effective auto value with an `a` suffix.
+- **Outbound FOV:** `fov_h` / `fov_v` are constant angles on the 7278 packet,
+  default 104.5/104.5 like HWXR. They are never read from the camera, `system`
+  file or inbound packet; the VR Settings **FOV H/V** rows are the only writer.
+- **Camera FOV:** `camera_fov` (default 98, vertical) is applied to
+  `WorldCamera.fieldOfView` in `VRHeadTracker.OnPreRender`, after the game's
+  CameraFX/aim updates, so the tuned value survives to the render. It is a
+  single value, separate from the outbound pair; the VR Settings **Camera FOV**
+  row is 40–140 in 1° steps.
 - **Window resolution:** `render_width` / `render_height` `0,0` = AUTO/MAX from
   the container, `-1,-1` = leave the window alone; a positive pair pins it.
   `DetectContainerResolution` classifies the largest `Screen.resolutions` mode

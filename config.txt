@@ -94,15 +94,16 @@ pain_bar_inset=1.00
 # world. Only takes effect on the next spawn.
 occluder_scale=1.0
 
-# FOV sent to WinlatorXR on the 7278 packet, per axis, in degrees. This does NOT
-# have to match the FOV the game renders with. Declaring LESS shows the SAME scene,
-# shrunk toward the centre of the view, at full render resolution.
-# 0 = AUTO: use the FOV the runtime reports (the `system` info file if it carries
-# one, otherwise the inbound packet's FOV tangents), then fall back to 104.5.
-# Set either axis independently to tune H/V distortion; the VR Settings rows are
-# "FOV H" and "FOV V".
-fov_h=0
-fov_v=0
+# FOV sent to WinlatorXR on the 7278 packet, per axis, in degrees. These are
+# constants we choose, not values derived from the game or the runtime; HWXR
+# ships 104.5/104.5. The VR Settings rows are "FOV H" and "FOV V".
+fov_h=104.5
+fov_v=104.5
+
+# Vertical FOV of the game camera itself (single value). 98 is the game's own
+# first-person value. This is separate from the outbound FOV H/V pair above; tune
+# it with "Camera FOV" in VR Settings.
+camera_fov=98
 
 # Render resolution, applied once at startup and again when changed from the VR
 # Settings panel. Lower is a real win here - every pixel is rendered, captured,

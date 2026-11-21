@@ -102,10 +102,13 @@ public class VRManager : BaseUnityPlugin
     // without a rebuild if the runtime ever stops reading it.
     public static int syncPixelSize = 10;
     // Outbound FOV sent to WinlatorXR on the haptic/mode packet, in degrees, per axis.
-    // 0 = auto: the runtime's reported FOV (system file if it carries one, otherwise the
-    // inbound packet's tangents), falling back to 104.5. The camera's own FOV is separate.
-    public static float fovH = 0f;
-    public static float fovV = 0f;
+    // Constant values we own (HWXR ships 104.5/104.5 in fov.txt), adjustable from the VR
+    // Settings rows; never derived from the game camera or the runtime.
+    public static float fovH = 104.5f;
+    public static float fovV = 104.5f;
+    // Vertical FOV of the game camera itself. 98 is the game's own first-person value;
+    // it is a separate axis from the outbound WinlatorXR FOV pair above.
+    public static float cameraFov = 98f;
     // Render resolution. Applied once at startup and on spawn. The config default is
     // 0,0 = AUTO/MAX: use the largest mode the container reports. -1,-1 = OFF: leave the
     // window exactly as the game/container made it. A positive pair pins the window.
@@ -440,11 +443,14 @@ public class VRManager : BaseUnityPlugin
                 if(k=="shadow_resolution" || k=="shadowresolution"){ int n; if(int.TryParse(v, out n) && n >= 0 && n <= 3) shadowResolution = n; }
                 if(k=="fov_h" || k=="fovh" || k=="fov_x" || k=="fovx"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 180f) fovH = f; }
                 if(k=="fov_v" || k=="fovv" || k=="fov_y" || k=="fovy"){ float f; if(float.TryParse(v, out f) && f >= 0f && f <= 180f) fovV = f; }
+                if(k=="camera_fov" || k=="camerafov" || k=="fov_camera"){ float f; if(float.TryParse(v, out f) && f >= 20f && f <= 140f) cameraFov = f; }
             }
             if(!sawFlipHands) flipHandsExplicit = false;
             VRInput.SetConfig(deadzone);
-            // 0 on either axis means auto; XRAPI resolves system file -> inbound packet
-            // -> 104.5 at packet build time.
+            // Old configs used 0 for auto. The outbound FOV is now a constant pair;
+            // fall back to the HWXR default instead of deriving it from anything.
+            if (fovH <= 1f) fovH = 104.5f;
+            if (fovV <= 1f) fovV = 104.5f;
             XRAPI.SetConfiguredFov(fovH, fovV);
         } catch(Exception e){
             VRManagerLogger.LogError("[IMVR] Config error: "+e);

@@ -23,7 +23,7 @@ using UnityEngine;
 // It used to be one column of nineteen rows at 5.5% of screen height each, which is
 // 1.05 screens tall - so the bottom of it, Close button included, was off the panel and
 // then off the visible area again. The list only grows, so the layout has to be one
-// that scales: two columns at 4.2% fit twenty-four rows in about 61% of the height,
+// that scales: two columns at 4.0% fit twenty-six rows in about 62% of the height,
 // inside the 62% the headset actually shows. Scrolling was the alternative and was rejected - dragging
 // a scrollbar through the runtime's pointer emulation is far worse than clicking a
 // button, and nothing here benefits from being hidden.
@@ -39,7 +39,7 @@ public class VRTuneMenu : MonoBehaviour
     // owner confirmed on 1 Nov that the green HUD sits exactly on the top and bottom
     // edges of the visible area, so the HUD's own scale is a measured proxy for it.
     const float SAFE = 0.62f;
-    const int ROWS_PER_COLUMN = 12;
+    const int ROWS_PER_COLUMN = 13;
 
     // Offered as whole presets rather than two independent width and height rows,
     // because most of the pairs those would let you build are not worth rendering.
@@ -123,9 +123,9 @@ public class VRTuneMenu : MonoBehaviour
             return;
         }
 
-        // 12 rows fit by dropping from 4.5% to 4.2% per row; the panel stays inside the
-        // measured 62% visible area with the Close button included.
-        float rowH = Screen.height * 0.042f;
+        // 13 rows fit by dropping to 4.0% per row; the panel stays inside the measured
+        // 62% visible area with the Close button included.
+        float rowH = Screen.height * 0.040f;
         // Full safe width now, not 62% of it - the columns need the room, and this is
         // the region that was measured as visible anyway.
         Rect panel = new Rect(safe.x, safe.y, safe.width, Mathf.Min(rowH * (ROWS_PER_COLUMN + 2.5f), safe.height));
@@ -149,12 +149,14 @@ public class VRTuneMenu : MonoBehaviour
         // Fog follows this automatically - see VRVisualTweaks.ApplyFog.
         VRManager.farClip = Row(R(colAx, y, colW, rowH), "Far clip (fog)", VRManager.farClip, 5f, 10f, 400f, "far_clip", "0"); y += rowH;
 
-        // Outbound FOV for the 7278 packet, per axis, in degrees. 0 = auto: show the
-        // effective runtime value with an "a" suffix; the first -/+ pins a value.
-        float effH, effV;
-        XRAPI.GetEffectiveFov(out effH, out effV);
-        VRManager.fovH = FovRow(R(colAx, y, colW, rowH), "FOV H", VRManager.fovH, effH, "fov_h"); y += rowH;
-        VRManager.fovV = FovRow(R(colAx, y, colW, rowH), "FOV V", VRManager.fovV, effV, "fov_v"); y += rowH;
+        // Vertical FOV of the game camera itself. Separate from the two outbound values
+        // below; applied in VRHeadTracker.OnPreRender.
+        VRManager.cameraFov = Row(R(colAx, y, colW, rowH), "Camera FOV", VRManager.cameraFov, 1f, 40f, 140f, "camera_fov", "0.#"); y += rowH;
+
+        // Constants we send on the 7278 packet. Not auto, not read from the game or the
+        // runtime; the VR menu is the only thing that changes them.
+        VRManager.fovH = Row(R(colAx, y, colW, rowH), "FOV H", VRManager.fovH, 1f, 10f, 180f, "fov_h", "0.#"); y += rowH;
+        VRManager.fovV = Row(R(colAx, y, colW, rowH), "FOV V", VRManager.fovV, 1f, 10f, 180f, "fov_v", "0.#"); y += rowH;
         XRAPI.SetConfiguredFov(VRManager.fovH, VRManager.fovV);
 
         VRManager.turnSpeed = Row(R(colAx, y, colW, rowH), "Turn speed", VRManager.turnSpeed, 5f, 10f, 240f, "turn_speed", "0"); y += rowH;
@@ -336,39 +338,6 @@ public class VRTuneMenu : MonoBehaviour
             if (diff < bestDiff) { bestDiff = diff; best = i; }
         }
         return best;
-    }
-
-    // FOV row: 0 means "follow the runtime". Display the effective value with an "a"
-    // suffix so the player can see what is actually being sent; the first -/+ pins it.
-    float FovRow(Rect r, string text, float configured, float effective, string key)
-    {
-        GUI.Label(new Rect(r.x, r.y, r.width * 0.46f, r.height), text, label);
-
-        float bw = r.width * 0.12f;
-        float bx = r.x + r.width * 0.46f;
-        float shown = configured > 1f ? configured : effective;
-        bool auto = configured <= 1f;
-
-        if (GUI.Button(new Rect(bx, r.y + r.height * 0.1f, bw, r.height * 0.8f), "-", button))
-        {
-            shown = Mathf.Clamp(shown - 5f, 0f, 180f);
-            configured = shown;
-            auto = configured <= 1f;
-            VRConfigFile.Set(key, configured.ToString("0.#", CultureInfo.InvariantCulture));
-        }
-
-        GUI.Label(new Rect(bx + bw, r.y, r.width * 0.30f, r.height),
-            shown.ToString("0.#", CultureInfo.InvariantCulture) + (auto ? "a" : ""), value);
-
-        if (GUI.Button(new Rect(bx + bw + r.width * 0.30f, r.y + r.height * 0.1f, bw, r.height * 0.8f), "+", button))
-        {
-            shown = Mathf.Clamp(shown + 5f, 0f, 180f);
-            configured = shown;
-            auto = configured <= 1f;
-            VRConfigFile.Set(key, configured.ToString("0.#", CultureInfo.InvariantCulture));
-        }
-
-        return configured;
     }
 
     // Returns the possibly-changed value, and persists it on change. Taking and

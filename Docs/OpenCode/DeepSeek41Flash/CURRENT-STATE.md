@@ -135,7 +135,8 @@ the 2 s poll reverts them.
 | `pain_bar_width` | `0.15` | `0.15` | Fraction of visible width |
 | `pain_bar_inset` | `1.00` | `1.00` | Confirmed on device; full frame width is visible |
 | `occluder_scale` | `1.0` | `1.0` | `HelmetOccluder`; layer 14, cannot affect the world |
-| `fov_h` / `fov_v` | `0` / `0` | `0` / `0` | Outbound 7278 FOV per axis, degrees. `0` = auto: `system` FOV if present, else the inbound packet's tangents, else 104.5. VR Settings **FOV H/V** rows |
+| `fov_h` / `fov_v` | `104.5` / `104.5` | same | Constant outbound 7278 FOV per axis, degrees. Owned by config/VR Settings; never derived from the game camera or runtime. HWXR ships the same 104.5/104.5 |
+| `camera_fov` | `98` | `98` | Vertical FOV of the game camera itself (single value), applied in `VRHeadTracker.OnPreRender`. Separate from the outbound pair. VR Settings **Camera FOV** row |
 | `render_width` / `render_height` | `0` / `0` | same | `0,0` = AUTO/MAX from the container; `-1,-1` = leave the window alone. Menu presets follow the detected 1:1 / 16:9 / 4:3 aspect |
 | `world_render_scale` | `0.5` | `0.5` | 3D world render scale, `0.25`–`2.0`. Below 1 performance, `1.0` direct, above 1 supersampling. HUD stays full-res |
 | `gun_fullres` | `1` | `true` | Weapon gets its own full-res camera on layer 30; the low-res world pass stops drawing it. Drawn over the upscaled world with depth cleared, so walls do not occlude it |

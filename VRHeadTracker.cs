@@ -17,9 +17,15 @@ public class VRHeadTracker : MonoBehaviour
         baseLocalPos = transform.localPosition;
         baseLocalRot = transform.localRotation;
     }
-    void LateUpdate()
+    // Applied as late as possible so the game's CameraFX/aim code cannot overwrite the
+    // tuned vertical FOV before the frame is rendered.
+    void OnPreRender()
     {
-        if (VRManagerState.VRRoot == null) return;
+        if (cam != null && VRManager.cameraFov > 1f) cam.fieldOfView = VRManager.cameraFov;
+    }
+
+    void LateUpdate()
+    {        if (VRManagerState.VRRoot == null) return;
         if (Marine.LocalMarine == null) return;
         VRManagerState.VRRoot.transform.position = Marine.LocalMarine.transform.position;
         VRManagerState.VRRoot.transform.rotation = Quaternion.Euler(0f, Marine.LocalMarine.transform.eulerAngles.y, 0f);

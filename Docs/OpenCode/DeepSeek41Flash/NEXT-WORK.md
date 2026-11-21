@@ -85,11 +85,14 @@ Ask for one report covering:
    hands still move in `hands_roll=1`, note whether they rotate around the
    screen centre (camera-forward pivot) or drift. With `world_render_scale=1.0`,
    head roll falls back to the camera and the HUD rolls with it.
-8. **FOV H/V:** leave `fov_h=0`/`fov_v=0`, note the `System FOV` /
-   `Runtime FOV default` log line, then adjust one axis at a time from the VR
-   Settings **FOV H/V** rows (the value shows with `a` while auto). The goal is
-   the pair that fills the panel without horizontal or vertical stretch; the
-   camera FOV is separate and stays 98.
+8. **FOV tuning:** the outbound pair is a constant we own, default
+   `104.5/104.5` (HWXR), adjusted with the VR Settings **FOV H/V** rows (1°).
+   The game camera's vertical FOV is a separate single value, `camera_fov`
+   (default 98), adjusted with **Camera FOV**; it is applied in
+   `VRHeadTracker.OnPreRender`. Tune the three by eye on the Quest 3: the
+   `Camera real FOV` log prints the rendered vertical/horizontal pair, and the
+   outbound pair is sent on every 7278 packet. The goal is no edge warp on head
+   roll and no horizontal/vertical stretch.
 
 If it misbehaves, bisect in this order: handshake (`version`/`vr`/`system`) →
 world scaler (`world_render_scale` 1.0) → UDP parser (revert to string parser) →

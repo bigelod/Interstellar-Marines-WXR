@@ -372,7 +372,7 @@ class Helmet_VR_NearClip
             // owns both: culling off and a collapsed view distance while inside geometry,
             // full culling and full distance the rest of the time.
             ___playerCamera.farClipPlane = VRManager.farClip;
-            ___playerCamera.fieldOfView = 98f;
+            ___playerCamera.fieldOfView = VRManager.cameraFov;
             // Log what the camera ACTUALLY renders, so the declared FOV can be
             // compared against it. Unity's fieldOfView is vertical; horizontal depends on
             // aspect. Declaring less than these shrinks the view toward the centre.
